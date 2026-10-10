@@ -17,6 +17,17 @@ function Util.play_sound(snd, volume, pitch, x, y)
     end)
 end
 
+-- Escribe un error en el log una sola vez por mensaje (evita inundarlo cada frame)
+local logged_errors = {}
+
+function Util.log_once(tag, err)
+    local text = tostring(err)
+    local key = tag .. "|" .. text
+    if logged_errors[key] then return end
+    logged_errors[key] = true
+    log.error("[RestoredCutContent] " .. tag .. ": " .. text)
+end
+
 function Util.chat(message)
     pcall(function()
         gm.chat_add_message(message)
@@ -37,12 +48,21 @@ local function lerp(a, b, t)
     return a + (b - a) * t
 end
 
--- Mezcla de dos colores {r, g, b}; t = 0 devuelve from, t = 1 devuelve to
+-- Mezcla de dos colores {r, g, b} que devuelve otra tabla {r, g, b}
+-- (para encadenar mezclas; mix_blend devuelve ya el entero para image_blend)
+function Util.lerp_rgb(from_rgb, to_rgb, t)
+    return {
+        lerp(from_rgb[1], to_rgb[1], t),
+        lerp(from_rgb[2], to_rgb[2], t),
+        lerp(from_rgb[3], to_rgb[3], t),
+    }
+end
+
+-- Mezcla de dos colores {r, g, b}; t = 0 devuelve from, t = 1 devuelve to.
+-- Devuelve el color empaquetado listo para image_blend.
 function Util.mix_blend(from_rgb, to_rgb, t)
-    return Util.rgb(
-        math.floor(lerp(from_rgb[1], to_rgb[1], t)),
-        math.floor(lerp(from_rgb[2], to_rgb[2], t)),
-        math.floor(lerp(from_rgb[3], to_rgb[3], t)))
+    local mixed = Util.lerp_rgb(from_rgb, to_rgb, t)
+    return Util.rgb(math.floor(mixed[1]), math.floor(mixed[2]), math.floor(mixed[3]))
 end
 
 -- Tinte que oscila suavemente entre dos colores; period en frames
@@ -90,27 +110,6 @@ function Util.random_spark(shrine, chance, spread, y_min, y_max)
     end
 end
 
--- Escala relativa (1 = tamano original) conservando el espejado del sprite
-function Util.scale_to(shrine, data, sx, sy)
-    if not data.base_xscale then
-        data.base_xscale = shrine.image_xscale
-        data.base_yscale = shrine.image_yscale
-        if type(data.base_xscale) ~= "number" or data.base_xscale == 0 then data.base_xscale = 1 end
-        if type(data.base_yscale) ~= "number" or data.base_yscale == 0 then data.base_yscale = 1 end
-    end
-    shrine.image_xscale = data.base_xscale * sx
-    shrine.image_yscale = data.base_yscale * sy
-end
-
-function Util.scale_reset(shrine, data)
-    if data.base_xscale then
-        shrine.image_xscale = data.base_xscale
-        shrine.image_yscale = data.base_yscale
-        data.base_xscale = nil
-        data.base_yscale = nil
-    end
-end
-
 -- Sacude la x del altar alrededor de su posicion original
 function Util.shake(shrine, data, intensity)
     if not data.base_x then data.base_x = shrine.x end
@@ -133,18 +132,14 @@ function Util.crumble_step(shrine, data, cfg)
     local raw = math.min(1, data.crumble_t / cfg.duration)
     local progress = Util.ease_in(raw)   -- empieza suave y se acelera hacia el final
 
-    -- Contencion: en los ultimos frames todo se queda quieto y la estatua se encoge
-    -- un instante (anticipacion) justo antes del estallido
+    -- Contencion: en los ultimos frames todo se queda quieto un instante
+    -- (anticipacion) justo antes del estallido
     local hold_frames = cfg.hold_frames or 8
     local frames_left = cfg.duration - data.crumble_t
     if frames_left < hold_frames then
         Util.shake_end(shrine, data)
-        Util.scale_to(shrine, data, 0.97, 0.95)
     else
         Util.shake(shrine, data, cfg.max_shake * progress)
-        -- Hinchazon con latido cada vez mas rapido
-        local swell = 1 + 0.045 * progress + 0.012 * progress * math.sin(data.crumble_t * (0.25 + 0.6 * progress))
-        Util.scale_to(shrine, data, swell, swell)
     end
 
     local span = cfg.frame_to - cfg.frame_from
@@ -157,38 +152,50 @@ function Util.crumble_step(shrine, data, cfg)
 
     if data.crumble_t >= cfg.duration then
         Util.shake_end(shrine, data)
-        Util.scale_reset(shrine, data)
         data.crumble_t = nil
         return true
     end
     return false
 end
 
--- Lluvia de cascotes (sEfRubble sobre oEfExplosion, que se autodestruye al acabar
--- la animacion) lanzados hacia arriba, mas nubes de polvo en la base
+-- Cascotes: efectos temporales con vida limitada. Cada pieza se registra aqui y se
+-- destruye por la fuerza al cumplirse su tiempo, aunque el objeto no se autodestruya.
+local DEBRIS_LIFETIME = 75   -- frames
+local debris_pieces = {}
+
+Callback.add(Callback.TYPE.postStep, "RCC_Util_DebrisCleanup", function()
+    for i = #debris_pieces, 1, -1 do
+        local piece = debris_pieces[i]
+        piece.ttl = piece.ttl - 1
+        local alive = Instance.exists(piece.inst)
+        if not alive then
+            table.remove(debris_pieces, i)
+        elseif piece.ttl <= 0 then
+            pcall(function() gm.instance_destroy(piece.inst) end)
+            table.remove(debris_pieces, i)
+        end
+    end
+end)
+
+-- Lluvia de cascotes (sEfRubble sobre oEfExplosion) lanzados hacia arriba.
+-- Sin polvo: oEfDust1/2 son emisores que no terminan nunca.
 function Util.debris_burst(x, y, count)
     local rubble = gm.constants.sEfRubble
     local explosion = gm.constants.oEfExplosion
-    if rubble and explosion then
-        for _ = 1, count do
-            pcall(function()
-                local piece = gm.instance_create(x + gm.random_range(-24, 24), y - gm.random_range(15, 80), explosion)
-                piece.sprite_index = rubble
-                piece.hspeed = gm.random_range(-3.5, 3.5)
-                piece.vspeed = -gm.random_range(2.0, 6.0)
-                piece.gravity = 0.3
-            end)
-        end
-    end
+    if not rubble or not explosion then return end
 
-    for _, dust in ipairs({ gm.constants.oEfDust1, gm.constants.oEfDust2 }) do
-        for _ = 1, 3 do
-            pcall(function()
-                gm.instance_create(x + gm.random_range(-30, 30), y - gm.random_range(0, 12), dust)
-            end)
-        end
+    for _ = 1, count do
+        pcall(function()
+            local piece = gm.instance_create(x + gm.random_range(-24, 24), y - gm.random_range(15, 80), explosion)
+            piece.sprite_index = rubble
+            piece.hspeed = gm.random_range(-3.5, 3.5)
+            piece.vspeed = -gm.random_range(2.0, 6.0)
+            piece.gravity = 0.3
+            table.insert(debris_pieces, { inst = piece, ttl = DEBRIS_LIFETIME })
+        end)
     end
 end
+
 
 -- Reproduce de principio a fin la animacion nativa de muerte de un altar.
 -- cfg = { sprite, frames, holds = {frames por fotograma}, default_hold, on_frame(frame) }
@@ -201,7 +208,6 @@ function Util.death_step(shrine, data, cfg)
         shrine.image_speed = 0
         shrine.image_blend = Util.BLEND_NORMAL
         Util.shake_end(shrine, data)
-        Util.scale_reset(shrine, data)
     end
     data.death_t = data.death_t + 1
 
@@ -345,6 +351,28 @@ local function far_from_marks(x, gap)
     return true
 end
 
+local EDGE_HALF_WIDTH = 64    -- suelo firme exigido a cada lado del altar (px)
+local MAP_EDGE_MARGIN = 320   -- distancia minima a los bordes izquierdo/derecho del mapa
+
+-- Un altar solo se coloca si hay suelo solido bajo su centro y a ambos lados, y si
+-- no esta pegado al borde del mapa: nada de altares colgando de un precipicio.
+local function has_firm_ground(x, y, room_width)
+    if x < MAP_EDGE_MARGIN or x > room_width - MAP_EDGE_MARGIN then return false end
+    local solid = gm.constants.oB
+    for _, dx in ipairs({ -EDGE_HALF_WIDTH, -EDGE_HALF_WIDTH / 2, 0, EDGE_HALF_WIDTH / 2, EDGE_HALF_WIDTH }) do
+        if gm.position_meeting(x + dx, y + 3, solid) ~= 1.0 then return false end
+    end
+    return true
+end
+
+local function current_room_width()
+    local width = 3000
+    pcall(function()
+        width = gm._mod_room_get_current_width()
+    end)
+    return width
+end
+
 local function existing_ids(object_id)
     local ids = {}
     for _, inst in ipairs(Instance.find_all(object_id)) do
@@ -361,10 +389,7 @@ local function spawn_with_director(object_id, margin)
     end
     if not director or not Instance.exists(director) then return nil end
 
-    local room_width = 3000
-    pcall(function()
-        room_width = gm._mod_room_get_current_width()
-    end)
+    local room_width = current_room_width()
 
     local before = existing_ids(object_id)
     local ok = pcall(function()
@@ -383,15 +408,17 @@ end
 local function spawn_on_platform(object_id, player, min_distance, gap)
     local blocks = Instance.find_all(gm.constants.oB)
     if #blocks == 0 then return nil end
+    local room_width = current_room_width()
 
-    for _ = 1, 60 do
+    for _ = 1, 120 do
         local block = blocks[gm.irandom_range(1, #blocks)]
         if block and Instance.exists(block) then
             local x = block.x + 16
             local y = block.y
             local far_from_player = (not player) or math.abs(x - player.x) > min_distance
             local free_above = gm.position_meeting(x, y - 40, gm.constants.oB) == 0.0
-            if far_from_player and free_above and y > 120 and far_from_marks(x, gap) then
+            if far_from_player and free_above and y > 120 and far_from_marks(x, gap)
+                and has_firm_ground(x, y, room_width) then
                 local inst = gm.instance_create(x, y, object_id)
                 if inst and Instance.exists(inst) then return inst end
             end
@@ -408,10 +435,13 @@ function Util.spawn_shrines(object_id, count, player, min_distance, gap, configu
 
     for _ = 1, count do
         local inst = spawn_with_director(object_id, margin)
-        if inst and not far_from_marks(inst.x, gap) then
-            -- El Director lo dejo pegado a otro altar: descartar y buscar otro sitio
-            pcall(function() inst:destroy() end)
-            inst = nil
+        if inst then
+            -- Descartar si quedo pegado a otro altar, al borde de una plataforma o del mapa
+            local room_width = current_room_width()
+            if not far_from_marks(inst.x, gap) or not has_firm_ground(inst.x, inst.y, room_width) then
+                pcall(function() inst:destroy() end)
+                inst = nil
+            end
         end
         if not inst then
             inst = spawn_on_platform(object_id, player, min_distance, gap)

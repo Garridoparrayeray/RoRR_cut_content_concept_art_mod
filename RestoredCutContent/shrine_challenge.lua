@@ -71,6 +71,12 @@ local COST_PER_THREAT = 0.6     -- cada punto de amenaza suma el 60% del coste b
 local COST_REFRESH    = 30      -- frames entre recalculos mientras nadie lo activa
 
 local GRACE_FRAMES        = 60
+
+-- Anti-bloqueo: si quedan pocos enemigos y no cae ninguno, se avisa y luego se ejecutan
+local BEACON_MAX_ENEMIES   = 3      -- a partir de aqui se marcan con chispas
+local BEACON_INTERVAL      = 45     -- frames entre chispas sobre cada enemigo
+local STALL_WARN_FRAMES    = 1200   -- 20 s sin bajas: aviso en el chat y en el log
+local STALL_EXECUTE_FRAMES = 2700   -- 45 s sin bajas: el altar reclama a los rezagados
 local BLIGHTED_MIN_THREAT = 4.5
 local BLIGHTED_MIN_STAGE  = 3
 local BLIGHTED_CHANCE     = 0.35
@@ -441,21 +447,16 @@ local function update_charging(shrine, data)
     shrine.image_speed = 0
     shrine.image_blend = Util.mix_blend(BLEND_WHITE, BLEND_CHARGE_TO, Util.ease_in_out(progress))
 
-    local frames_left = total - data.timer
-    if frames_left < 8 then
-        -- Anticipacion: se contrae justo antes de soltar el rayo
+    -- Anticipacion: en los ultimos frames se queda quieta antes de soltar el rayo
+    if total - data.timer < 8 then
         Util.shake_end(shrine, data)
-        Util.scale_to(shrine, data, 0.97, 0.95)
     else
         Util.shake(shrine, data, 1.3 * Util.ease_in(progress))
-        local breath = 1 + 0.035 * progress * math.sin(data.timer * (0.22 + 0.35 * progress))
-        Util.scale_to(shrine, data, breath, breath)
     end
 
     Util.random_spark(shrine, 0.02 + 0.30 * Util.ease_in(progress), 12, 12, 62)
 
     if data.timer >= total then
-        Util.scale_reset(shrine, data)
         begin_beam(shrine, data)
     end
 end
@@ -466,16 +467,14 @@ local function beam_total()
     return total
 end
 
--- Rayo completo: cae (7) y se expande en onda (8, 9). El golpe estira la estatua
--- hacia arriba y el rebote se amortigua hasta asentarse (squash & stretch).
+-- Rayo completo: cae (7) y se expande en onda (8, 9). El golpe hace temblar la
+-- estatua y el temblor se amortigua hasta asentarse.
 local function update_beam(shrine, data)
     data.timer = data.timer + 1
     shrine.image_speed = 0
 
     local total = beam_total()
     local kick = 1 - Util.ease_out(Util.clamp01(data.timer / total))   -- 1 -> 0
-    local wobble = math.sin(data.timer * 0.9) * 0.02 * kick
-    Util.scale_to(shrine, data, 1 - 0.05 * kick + wobble, 1 + 0.10 * kick - wobble)
     Util.shake(shrine, data, 3.5 * kick)
 
     local remaining = data.timer
@@ -490,7 +489,6 @@ local function update_beam(shrine, data)
     end
 
     Util.shake_end(shrine, data)
-    Util.scale_reset(shrine, data)
     data.phase = "combat"
     data.timer = 0
     data.grace_timer = 0
@@ -506,6 +504,38 @@ local function victory(shrine, data)
     give_reward(shrine, data)
 end
 
+-- El altar reclama a los rezagados: dano letal por la via normal del juego, de modo
+-- que mueren con sus drops y el desafio no se queda bloqueado por un enemigo
+-- inactivo, atascado o fuera de alcance.
+local function execute_stragglers(shrine, data)
+    local executor = Util.nearest_player(shrine.x, shrine.y)
+    for _, mob in ipairs(data.mobs) do
+        if Instance.exists(mob) then
+            local ok = false
+            if executor then
+                ok = pcall(function()
+                    executor:fire_direct(mob, 1000000, 0, nil, nil, gm.constants.sNone, false)
+                end)
+            end
+            if not ok then
+                pcall(function() gm.instance_destroy(mob) end)
+            end
+            Util.spark_at(mob.x, mob.y - 20)
+        end
+    end
+    Util.chat("<y>[Altar de Desafío]</c> El altar reclama a los rezagados.")
+    log.info("[RestoredCutContent] Desafio: rezagados ejecutados (" .. #data.mobs .. ")")
+    data.mobs = {}
+end
+
+local function describe_mob(mob)
+    local object_index = "?"
+    pcall(function() object_index = tostring(mob.object_index) end)
+    local hp = "?"
+    pcall(function() hp = tostring(mob.hp) end)
+    return string.format("obj=%s hp=%s pos=(%.0f,%.0f)", object_index, hp, mob.x, mob.y)
+end
+
 local function track_enemies(shrine, data)
     data.grace_timer = data.grace_timer + 1
     if data.grace_timer < GRACE_FRAMES then return end
@@ -517,8 +547,12 @@ local function track_enemies(shrine, data)
     data.mobs = alive_mobs
 
     local alive = #alive_mobs
+    data.stall_timer = (data.stall_timer or 0) + 1
+
     if alive ~= data.alive_count then
         data.alive_count = alive
+        data.stall_timer = 0
+        data.warned = false
         if alive > 0 then
             Util.chat("<y>[Altar de Desafío]</c> Enemigos restantes: " .. alive)
             -- Cada baja le arranca un destello al altar
@@ -530,6 +564,29 @@ local function track_enemies(shrine, data)
     end
 
     if alive == 0 and data.initial_count > 0 then
+        victory(shrine, data)
+        return
+    end
+
+    -- Con pocos enemigos vivos: chispas sobre cada uno para que se puedan localizar
+    if alive > 0 and alive <= BEACON_MAX_ENEMIES then
+        if data.stall_timer % BEACON_INTERVAL == 0 then
+            for _, mob in ipairs(alive_mobs) do
+                Util.spark_at(mob.x, mob.y - 24)
+            end
+        end
+        if data.stall_timer == STALL_WARN_FRAMES and not data.warned then
+            data.warned = true
+            Util.chat("<y>[Altar de Desafío]</c> Quedan " .. alive .. ": busca las chispas sobre ellos.")
+            for _, mob in ipairs(alive_mobs) do
+                log.info("[RestoredCutContent] Desafio: sigue vivo " .. describe_mob(mob))
+            end
+        end
+    end
+
+    -- Estancado: sin bajas durante mucho tiempo y quedan pocos -> ejecutar rezagados
+    if alive > 0 and alive <= BEACON_MAX_ENEMIES and data.stall_timer >= STALL_EXECUTE_FRAMES then
+        execute_stragglers(shrine, data)
         victory(shrine, data)
     end
 end
@@ -558,12 +615,8 @@ local function update_combat(shrine, data)
     end
     shrine.image_speed = 0
 
-    local bright = Util.mix_blend(BLEND_COMBAT_B, BLEND_HOT, intensity)
+    local bright = Util.lerp_rgb(BLEND_COMBAT_B, BLEND_HOT, intensity)
     shrine.image_blend = Util.pulse_blend(data.timer, period, BLEND_COMBAT_A, bright)
-
-    -- Respiracion sincronizada con el latido
-    local breath = 1 + 0.014 * math.sin(data.timer * 2 * math.pi / period)
-    Util.scale_to(shrine, data, breath, breath)
 
     Util.random_spark(shrine, 0.04 + 0.12 * intensity, 14, 20, 66)
     if data.timer % math.floor(period * 1.8) == 0 and gm.constants.oEfCircle then
@@ -680,7 +733,8 @@ end
 
 Callback.add(Callback.TYPE.postStep, "ChallengeShrine_Update", function()
     for _, shrine in ipairs(Instance.find_all(SHRINE_OBJ)) do
-        pcall(update_shrine, shrine)
+        local ok, err = pcall(update_shrine, shrine)
+        if not ok then Util.log_once("ChallengeShrine", err) end
     end
 end)
 

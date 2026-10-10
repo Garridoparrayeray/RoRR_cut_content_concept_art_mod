@@ -271,13 +271,12 @@ local function update_waking(shrine, data, layout)
 
     local t = Util.clamp01(data.timer / WAKE_FRAMES)
     local kick = 1 - Util.ease_out(t)
-    local bounce = math.sin(data.timer * 0.8) * 0.02 * kick
-    Util.scale_to(shrine, data, 1 + 0.07 * kick + bounce, 1 + 0.07 * kick + bounce)
+    Util.shake(shrine, data, 1.8 * kick)   -- sacudida de despertar que se amortigua
     shrine.image_blend = Util.mix_blend(COLOR_WHITE, COLOR_GOLD, Util.ease_out(t) * 0.35)
     Util.random_spark(shrine, 0.2, 12, 20, 90)
 
     if data.timer >= WAKE_FRAMES then
-        Util.scale_reset(shrine, data)
+        Util.shake_end(shrine, data)
         data.state = STATE_GLOWING
         data.timer = 0
     end
@@ -301,15 +300,12 @@ local function update_glowing(shrine, data, layout)
     local pulse = (math.sin(data.phase_acc * 0.8) + 1) / 2
     shrine.image_blend = Util.mix_blend(COLOR_WHITE, COLOR_GOLD, progress * (0.5 + 0.5 * pulse))
 
-    local breath = 1 + 0.03 * progress * math.sin(data.phase_acc)
-    Util.scale_to(shrine, data, breath, breath)
     Util.shake(shrine, data, 1.1 * Util.ease_in(progress))
 
     Util.random_spark(shrine, 0.03 + 0.25 * Util.ease_in(progress), 12, 20, 80)
 
     if t >= GLOW_FRAMES then
         Util.shake_end(shrine, data)
-        Util.scale_reset(shrine, data)
         data.state = STATE_BREAKING
         data.crumble_t = nil
         Util.play_sound(gm.constants.wChest1, 0.8, 0.7, shrine.x, shrine.y)
@@ -437,7 +433,8 @@ Callback.add(Callback.TYPE.postStep, "EmpowerShrine_Update", function()
     frame_counter = frame_counter + 1
 
     for _, shrine in ipairs(Instance.find_all(SHRINE_OBJ)) do
-        pcall(update_shrine, shrine)
+        local ok, err = pcall(update_shrine, shrine)
+        if not ok then Util.log_once("EmpowerShrine", err) end
     end
 
     for _, player in ipairs(Instance.find_all(gm.constants.oP)) do
