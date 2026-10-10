@@ -443,8 +443,10 @@ local function give_reward(shrine, data)
     local item = Item.get_random(pick_reward_tier(data.threat, data.stage_num))
     if item then
         item:create(shrine.x, shrine.y - 32)
+        log.info("[RestoredCutContent] Desafio: recompensa " .. tostring(item.identifier))
     else
         gm.instance_create(shrine.x, shrine.y - 16, gm.constants.oChest1)
+        log.info("[RestoredCutContent] Desafio: sin objeto aleatorio, cofre de respaldo")
     end
 end
 
@@ -560,6 +562,7 @@ local function victory(shrine, data)
     data.crumble_t = nil
     Util.play_sound(SND_WIN, 1.0, 1.0, shrine.x, shrine.y)
     Util.chat("<g>[Altar de Desafío]</c> ¡Horda derrotada! El altar se sobrecarga...")
+    log.info(string.format("[RestoredCutContent] Desafio: victoria (amenaza %.2f, fase %d)", data.threat, data.stage_num))
     give_reward(shrine, data)
 end
 
@@ -753,6 +756,7 @@ local function update_exploding(shrine, data)
     if finished then
         data.phase = "ruin"
         shrine.image_blend = Util.BLEND_NORMAL
+        log.info("[RestoredCutContent] Desafio: altar destruido")
         Util.chat("<y>[Altar de Desafío]</c> El altar estalla en pedazos.")
     end
 end

@@ -378,6 +378,7 @@ local function far_from_marks(x, gap)
     return true
 end
 
+local RELAX_STEPS = { 1.0, 0.6, 0.3 }   -- factores sobre distancia al jugador y separacion
 local EDGE_HALF_WIDTH = 64    -- suelo firme exigido a cada lado del altar (px)
 local MAP_EDGE_MARGIN = 320   -- distancia minima a los bordes izquierdo/derecho del mapa
 
@@ -471,7 +472,12 @@ function Util.spawn_shrines(object_id, count, player, min_distance, gap, configu
             end
         end
         if not inst then
-            inst = spawn_on_platform(object_id, player, min_distance, gap)
+            -- Si no hay hueco con las distancias ideales, se relajan por pasos (el
+            -- suelo firme y el margen del mapa se exigen siempre)
+            for _, factor in ipairs(RELAX_STEPS) do
+                inst = spawn_on_platform(object_id, player, min_distance * factor, gap * factor)
+                if inst then break end
+            end
         end
 
         if inst and Instance.exists(inst) then

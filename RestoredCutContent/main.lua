@@ -15,6 +15,7 @@ local MODULES = {
     "util.lua",
     "shrine_challenge.lua",   -- oShrine6: altar de desafio
     "shrine_empower.lua",     -- oShrineEmpower: altar de empoderamiento
+    "tardigrade.lua",         -- oMacT: Tardigrado (F12 = prueba)
     "debug_cheats.lua",       -- F5-F8
 }
 
@@ -23,7 +24,7 @@ local function load_modules()
         package.loaded[name] = nil
         require(name)
     end
-    log.info("[RestoredCutContent] Modulos cargados: " .. #MODULES .. " (build 2026-10-10-m: F5 empoderamiento, F9 desafio, F6 dios, F7 matar, F8 oro, F10-F11 frames)")
+    log.info("[RestoredCutContent] Modulos cargados: " .. #MODULES .. " (build 2026-10-10-o: F5 empoderamiento, F9 desafio, F6 dios, F7 matar, F8 oro, F10-F11 frames, F12 tardigrado)")
 end
 
 Initialize(load_modules)
