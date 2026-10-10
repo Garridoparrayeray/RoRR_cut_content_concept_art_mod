@@ -1,17 +1,19 @@
 -- ============================================================================
 -- shrine_empower.lua
--- Restaura oShrineEmpower (sprite sShrineEmpower): altar de un solo uso que pide
--- oro Y vida a la vez a cambio de la bendicion "blessing_empower"; despues se quiebra.
+-- Restaura oShrineEmpower (sprite sShrineEmpower): altar que pide oro Y vida a la
+-- vez a cambio de la bendicion "blessing_empower". Solo una vez por fase.
+-- Tras bendecir se sobrecarga y estalla con su animacion nativa (sShrineEmpowerDeath).
 --
--- Fotogramas de sShrineEmpower (por geometria): 0 reposo, 1 despertar,
--- 2-4 halo creciente, 5-6 estatua agrietada/rota.
+-- Fotogramas de sShrineEmpower (por geometria): 0 reposo, 1 despertar, 2-4 halo
+-- creciente. sShrineEmpowerDeath: 0-4 explosion creciente, 5 colapso, 6 escombros.
 -- ============================================================================
 
 local loaded = require("util.lua")
 local Util = (type(loaded) == "table") and loaded or RCC_UTIL
 
-local SHRINE_OBJ    = gm.constants.oShrineEmpower or 625
-local SHRINE_SPRITE = gm.constants.sShrineEmpower
+local SHRINE_OBJ          = gm.constants.oShrineEmpower or 625
+local SHRINE_SPRITE       = gm.constants.sShrineEmpower
+local SHRINE_DEATH_SPRITE = gm.constants.sShrineEmpowerDeath
 
 -- Precio: ambos se pagan a la vez
 local COST_BASE       = 25     -- oro con amenaza 0 (escala con la amenaza)
@@ -19,16 +21,39 @@ local COST_PER_THREAT = 0.5
 local COST_REFRESH    = 30     -- frames entre recalculos mientras nadie lo activa
 local LIFE_FRACTION   = 0.30   -- parte de la vida maxima que se ofrece (nunca letal)
 
-local BUFF_SECONDS   = 45
-local GLOW_FRAMES    = 180   -- 3 s de resplandor antes de quebrarse
-local SPARK_INTERVAL = 20
-local AURA_INTERVAL  = 15
+-- Generacion por mapa: probabilidad de que salgan 0, 1 o 2 altares. Aunque salgan
+-- varios, solo uno por mapa puede usarse: al tomar la bendicion, los demas se apagan.
+local SPAWN_WEIGHTS      = { 0.15, 0.55, 0.30 }
+local SPAWN_MIN_DISTANCE = 450    -- px minimos al jugador al generarse
+local SPAWN_GAP          = 450    -- px minimos entre altares
 
-local STATE_IDLE, STATE_GLOWING, STATE_BREAKING, STATE_SPENT = "idle", "glowing", "breaking", "spent"
+local BUFF_SECONDS = 45
+local AURA_INTERVAL = 15
+
+-- Animacion (frames; 60 = 1 segundo)
+local WAKE_FRAMES     = 18     -- el altar despierta (fotograma 1) con un golpe de escala
+local GLOW_FRAMES     = 180    -- 3 s de halo antes de sobrecargarse
+local CRUMBLE_FRAMES  = 120    -- sobrecarga previa al estallido
+local CRUMBLE_SHAKE   = 3.5
+local CRUMBLE_SPARKS  = 12
+
+local DEATH_FRAMES   = 7
+local DEATH_HOLDS    = { 4, 4, 4, 5, 6, 12, 1 }
+local DEATH_BURST_AT = 1       -- estalla
+local DEATH_AFTER_AT = 4       -- replica en el pico de la explosion
+local DEBRIS_BURST   = 20
+local DEBRIS_AFTER   = 8
+
+local COLOR_WHITE = { 255, 255, 255 }
+local COLOR_GOLD  = { 255, 205, 70 }
+local COLOR_HOT   = { 255, 245, 200 }
+
+local STATE_IDLE, STATE_WAKING, STATE_GLOWING, STATE_BREAKING, STATE_EXPLODING, STATE_SPENT =
+    "idle", "waking", "glowing", "breaking", "exploding", "spent"
 
 local shrine_spawned_this_stage = false
 local used_this_stage = false   -- la bendicion solo puede tomarse una vez por fase
-local shrine_data = {}        -- estado por id de instancia
+local shrine_data = {}          -- estado por id de instancia
 local frame_counter = 0
 
 -- ----------------------------------------------------------------------------
@@ -81,13 +106,13 @@ end)
 local function get_data(shrine)
     local id = shrine.id
     if not shrine_data[id] then
-        shrine_data[id] = { state = STATE_IDLE, glow_timer = 0 }
+        shrine_data[id] = { state = STATE_IDLE, timer = 0 }
     end
     return shrine_data[id]
 end
 
 -- Reparto de fotogramas segun el numero real de frames del sprite
--- (7: 0 reposo, 1 despertar, 2-4 halo, 5-6 rotura)
+-- (7: 0 reposo, 1 despertar, 2-4 halo)
 local function frame_layout(shrine)
     local count = 7
     pcall(function()
@@ -95,14 +120,7 @@ local function frame_layout(shrine)
     end)
     local last = math.max(3, count - 1)
     local halo_to = math.max(2, last - 2)
-    return {
-        rise = 1,
-        halo_from = 2,
-        halo_to = halo_to,
-        crumble_from = halo_to,
-        crumble_to = math.max(halo_to, last - 1),
-        last = last,
-    }
+    return { rise = 1, halo_from = 2, halo_to = halo_to, last = last }
 end
 
 -- Oro que cuesta ahora y vida que se descontara al activarlo
@@ -182,23 +200,15 @@ Callback.add(Callback.TYPE.postStep, "EmpowerShrine_SpawnLoop", function()
     if #players == 0 then return end
 
     shrine_spawned_this_stage = true
-    Util.spawn_shrine_naturally(SHRINE_OBJ, players[1], 450, configure_shrine)
+    local wanted = Util.roll_count(SPAWN_WEIGHTS)
+    local made = Util.spawn_shrines(SHRINE_OBJ, wanted, players[1], SPAWN_MIN_DISTANCE, SPAWN_GAP, configure_shrine)
+    log.info(string.format("[RestoredCutContent] Altares de empoderamiento en este mapa: %d (sorteados %d)", made, wanted))
 end)
 
 -- ----------------------------------------------------------------------------
--- Activacion, resplandor y derrumbe
---   idle > glowing (3 s) > breaking (2,5 s) > spent
+-- Activacion, halo, sobrecarga y estallido
+--   idle > waking > glowing > breaking > exploding > spent
 -- ----------------------------------------------------------------------------
-local GLOW_HOLD      = 14    -- frames por fotograma del halo
-local GLOW_PULSE     = 50    -- frames por latido del brillo
-local CRUMBLE_FRAMES = 150
-local CRUMBLE_SHAKE  = 3
-local CRUMBLE_SPARKS = 18
-
-local COLOR_WHITE = { 255, 255, 255 }
-local COLOR_GOLD  = { 255, 205, 70 }
-local COLOR_RUIN  = { 110, 110, 110 }
-
 local function find_activator(shrine)
     local activator = nil
     pcall(function()
@@ -210,18 +220,23 @@ local function find_activator(shrine)
     return activator or Util.nearest_player(shrine.x, shrine.y)
 end
 
--- Altar ya gastado (o vetado por haberse usado en la fase): ruina inerte
+-- Escombros inertes (ultimo fotograma de la muerte) o ruina si falta el sprite
 local function make_inert(shrine, data)
     data.state = STATE_SPENT
     shrine.active = 3
     shrine.image_speed = 0
-    shrine.image_index = frame_layout(shrine).last
-    shrine.image_blend = Util.rgb(COLOR_RUIN[1], COLOR_RUIN[2], COLOR_RUIN[3])
+    if SHRINE_DEATH_SPRITE then
+        shrine.sprite_index = SHRINE_DEATH_SPRITE
+        shrine.image_index = DEATH_FRAMES - 1
+    else
+        shrine.image_index = frame_layout(shrine).last
+    end
+    shrine.image_blend = Util.BLEND_NORMAL
 end
 
 local function start_blessing(shrine, data)
-    data.state = STATE_GLOWING
-    data.glow_timer = 0
+    data.state = STATE_WAKING
+    data.timer = 0
     shrine.active = 2   -- bloquea nuevas interacciones
     if not data.debug then
         used_this_stage = true
@@ -247,60 +262,126 @@ local function start_blessing(shrine, data)
     shrine.image_speed = 0
 end
 
--- Halo: fotogramas del halo uno a uno, brillo dorado que late y crece, chispas que se aceleran
+-- Despertar: golpe de escala que se asienta con un rebote amortiguado
+local function update_waking(shrine, data, layout)
+    data.timer = data.timer + 1
+    shrine.active = 2
+    shrine.image_speed = 0
+    shrine.image_index = layout.rise
+
+    local t = Util.clamp01(data.timer / WAKE_FRAMES)
+    local kick = 1 - Util.ease_out(t)
+    local bounce = math.sin(data.timer * 0.8) * 0.02 * kick
+    Util.scale_to(shrine, data, 1 + 0.07 * kick + bounce, 1 + 0.07 * kick + bounce)
+    shrine.image_blend = Util.mix_blend(COLOR_WHITE, COLOR_GOLD, Util.ease_out(t) * 0.35)
+    Util.random_spark(shrine, 0.2, 12, 20, 90)
+
+    if data.timer >= WAKE_FRAMES then
+        Util.scale_reset(shrine, data)
+        data.state = STATE_GLOWING
+        data.timer = 0
+    end
+end
+
+-- Halo: el fotograma sigue una onda (lento en los extremos, rapido en medio), la onda
+-- se acelera con el tiempo, el brillo late y las chispas se hacen mas frecuentes.
 local function update_glowing(shrine, data, layout)
-    data.glow_timer = data.glow_timer + 1
+    data.timer = data.timer + 1
     shrine.active = 2
 
-    local t = data.glow_timer
-    local progress = math.min(1, t / GLOW_FRAMES)
+    local t = data.timer
+    local progress = Util.clamp01(t / GLOW_FRAMES)
+    data.phase_acc = (data.phase_acc or 0) + (0.07 + 0.16 * progress)   -- radianes/frame, crece
 
-    -- Despertar (1) y despues el halo 2..4 yendo y viniendo (2,3,4,3,2...)
+    local span = layout.halo_to - layout.halo_from
+    local wave = (math.sin(data.phase_acc - math.pi / 2) + 1) / 2
     shrine.image_speed = 0
-    if t < GLOW_HOLD then
-        shrine.image_index = layout.rise
-    else
-        local span = layout.halo_to - layout.halo_from
-        local step = math.floor((t - GLOW_HOLD) / GLOW_HOLD) % (span * 2)
-        if step > span then step = span * 2 - step end
-        shrine.image_index = layout.halo_from + step
-    end
+    shrine.image_index = layout.halo_from + math.min(span, math.floor(wave * (span + 0.999)))
 
-    local pulse = (math.sin(t * 2 * math.pi / GLOW_PULSE) + 1) / 2
-    shrine.image_blend = Util.mix_blend(COLOR_WHITE, COLOR_GOLD, progress * (0.55 + 0.45 * pulse))
+    local pulse = (math.sin(data.phase_acc * 0.8) + 1) / 2
+    shrine.image_blend = Util.mix_blend(COLOR_WHITE, COLOR_GOLD, progress * (0.5 + 0.5 * pulse))
 
-    local interval = math.max(6, math.floor(SPARK_INTERVAL * (1 - progress * 0.7)))
-    if t % interval == 0 then
-        Util.spark_at(shrine.x + gm.random_range(-10, 10), shrine.y - 50)
-    end
+    local breath = 1 + 0.03 * progress * math.sin(data.phase_acc)
+    Util.scale_to(shrine, data, breath, breath)
+    Util.shake(shrine, data, 1.1 * Util.ease_in(progress))
+
+    Util.random_spark(shrine, 0.03 + 0.25 * Util.ease_in(progress), 12, 20, 80)
 
     if t >= GLOW_FRAMES then
+        Util.shake_end(shrine, data)
+        Util.scale_reset(shrine, data)
         data.state = STATE_BREAKING
+        data.crumble_t = nil
         Util.play_sound(gm.constants.wChest1, 0.8, 0.7, shrine.x, shrine.y)
         Util.chat("<y>[Altar de Empoderamiento]</c> El altar no soporta tanta energía...")
     end
 end
 
--- Derrumbe lento: temblor creciente, grietas cada vez mas seguidas y rotura final
+-- Sobrecarga: el halo en su pico tiembla, se hincha, se vuelve blanco calido y, justo
+-- antes de estallar, se contrae y se queda quieto un instante.
 local function update_breaking(shrine, data, layout)
     shrine.active = 3
 
-    local progress = math.min(1, ((data.crumble_t or 0) + 1) / CRUMBLE_FRAMES)
-    shrine.image_blend = Util.mix_blend(COLOR_GOLD, COLOR_RUIN, progress)
+    local progress = Util.clamp01(((data.crumble_t or 0) + 1) / CRUMBLE_FRAMES)
+    shrine.image_blend = Util.mix_blend(COLOR_GOLD, COLOR_HOT, Util.ease_in(progress))
 
     local finished = Util.crumble_step(shrine, data, {
         duration = CRUMBLE_FRAMES,
-        frame_from = layout.crumble_from,
-        frame_to = layout.crumble_to,
+        frame_from = layout.halo_to,
+        frame_to = layout.halo_to,
         max_shake = CRUMBLE_SHAKE,
         spark_interval = CRUMBLE_SPARKS,
+        hold_frames = 10,
     })
 
     if finished then
-        data.state = STATE_SPENT
-        shrine.image_index = layout.last
-        shrine.image_blend = Util.rgb(COLOR_RUIN[1], COLOR_RUIN[2], COLOR_RUIN[3])
+        data.state = STATE_EXPLODING
+        data.timer = 0
+    end
+end
+
+-- Estallido: animacion nativa sShrineEmpowerDeath, con replica en el pico y el
+-- resplandor enfriandose hasta dejar los escombros.
+local function update_exploding(shrine, data, layout)
+    shrine.active = 3
+
+    if not SHRINE_DEATH_SPRITE then
         Util.break_effects(shrine)
+        Util.debris_burst(shrine.x, shrine.y, DEBRIS_BURST)
+        shrine.image_index = layout.last
+        data.state = STATE_SPENT
+        return
+    end
+
+    local total = 0
+    for _, hold in ipairs(DEATH_HOLDS) do total = total + hold end
+
+    local finished = Util.death_step(shrine, data, {
+        sprite = SHRINE_DEATH_SPRITE,
+        frames = DEATH_FRAMES,
+        holds = DEATH_HOLDS,
+        default_hold = 5,
+        on_frame = function(frame)
+            if frame == DEATH_BURST_AT then
+                Util.break_effects(shrine)
+                Util.debris_burst(shrine.x, shrine.y, DEBRIS_BURST)
+                pcall(function() shrine:screen_shake(10) end)
+            elseif frame == DEATH_AFTER_AT then
+                Util.debris_burst(shrine.x, shrine.y, DEBRIS_AFTER)
+                for _ = 1, 6 do
+                    Util.spark_at(shrine.x + gm.random_range(-40, 40), shrine.y - gm.random_range(10, 110))
+                end
+                pcall(function() shrine:screen_shake(6) end)
+            end
+        end,
+    })
+
+    local cooling = Util.clamp01((data.death_t or 0) / total)
+    shrine.image_blend = Util.mix_blend(COLOR_HOT, COLOR_WHITE, Util.ease_out(cooling))
+
+    if finished then
+        data.state = STATE_SPENT
+        shrine.image_blend = Util.BLEND_NORMAL
         Util.chat("<y>[Altar de Empoderamiento]</c> ¡El altar se hace pedazos!")
     end
 end
@@ -326,17 +407,22 @@ local function update_shrine(shrine)
             start_blessing(shrine, data)
         end
 
+    elseif data.state == STATE_WAKING then
+        update_waking(shrine, data, layout)
     elseif data.state == STATE_GLOWING then
         update_glowing(shrine, data, layout)
-
     elseif data.state == STATE_BREAKING then
         update_breaking(shrine, data, layout)
-
+    elseif data.state == STATE_EXPLODING then
+        update_exploding(shrine, data, layout)
     else
-        -- Ruinas inertes: impedir cualquier reinteraccion
+        -- Escombros inertes: impedir cualquier reinteraccion
         shrine.active = 3
         shrine.image_speed = 0
-        shrine.image_index = layout.last
+        if SHRINE_DEATH_SPRITE then
+            shrine.sprite_index = SHRINE_DEATH_SPRITE
+            shrine.image_index = DEATH_FRAMES - 1
+        end
     end
 end
 
