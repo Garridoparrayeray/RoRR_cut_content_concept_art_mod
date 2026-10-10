@@ -99,6 +99,12 @@ local SND_WIN    = gm.constants.wLevelUp
 
 local FLYING_NAMES = { "oWisp", "oWispB", "oJelly" }
 
+-- Macrobic Tardigrade (oMacT): enemigo descartado que sigue en los archivos del juego.
+-- Aparece como enemigo medio en Bosque Desolado, Cavernas Humedas y Colmena.
+-- Si diera problemas (pantalla en blanco, excepciones), ponerlo en false.
+local TARDIGRADE_ENABLED = true
+local TARDIGRADE_OBJ     = gm.constants.oMacT
+
 -- Bestiario por fase (nombres de objeto; se resuelven contra gm.constants)
 local POOL_NAMES = {
     [1] = { name = "Fase 1",  light = { "oLizard", "oWisp" },           medium = { "oSpitter", "oLizard" }, heavy = { "oLizard" } },
@@ -112,13 +118,13 @@ local POOL_NAMES = {
 -- esta aqui (stage de otro mod, por ejemplo) se usa el bestiario por fase de arriba.
 local BIOME_POOLS = {
     driedlake         = { name = "Lago Seco",              light = { "oLizard", "oWisp" },   medium = { "oCrab", "oSpitter" },  heavy = { "oLizard" } },
-    desolateforest    = { name = "Bosque Desolado",        light = { "oBug", "oLizard" },    medium = { "oBoar", "oSpitter" },  heavy = { "oLizard" } },
-    dampcaverns       = { name = "Cavernas Humedas",       light = { "oLizard", "oJelly" },  medium = { "oClay", "oMush" },     heavy = { "oGolem" } },
+    desolateforest    = { name = "Bosque Desolado",        light = { "oBug", "oLizard" },    medium = { "oBoar", "oSpitter", "oMacT" }, heavy = { "oLizard" } },
+    dampcaverns       = { name = "Cavernas Humedas",       light = { "oLizard", "oJelly" },  medium = { "oClay", "oMush", "oMacT" }, heavy = { "oGolem" } },
     skymeadow         = { name = "Pradera Celestial",      light = { "oWisp", "oJelly" },    medium = { "oSpitter", "oClay" },  heavy = { "oGolem" } },
     ancientvalley     = { name = "Valle Antiguo",          light = { "oLizard", "oClay" },   medium = { "oGolem", "oBison" },   heavy = { "oWispB", "oBison" } },
     sunkentombs       = { name = "Tumbas Hundidas",        light = { "oLizard", "oClay" },   medium = { "oGolem", "oSpitter" }, heavy = { "oWispB", "oBison" } },
     magmabarracks     = { name = "Cuartel de Magma",       light = { "oImp", "oSpider" },    medium = { "oImpM", "oGolem" },    heavy = { "oWispB", "oBison" } },
-    hivecluster       = { name = "Colmena",                light = { "oSpider", "oBug" },    medium = { "oImpM", "oGuard" },    heavy = { "oWispB", "oGolem" } },
+    hivecluster       = { name = "Colmena",                light = { "oSpider", "oBug" },    medium = { "oImpM", "oGuard", "oMacT" }, heavy = { "oWispB", "oGolem" } },
     templeoftheelders = { name = "Templo de los Ancianos", light = { "oChild", "oImp" },     medium = { "oGuard", "oGolem" },   heavy = { "oGolemG", "oWispB" } },
 }
 
@@ -157,13 +163,24 @@ local function get_pool(stage_num)
     if not names then
         names = POOL_NAMES[tier]
     end
-    return {
+
+    local pool = {
         name = names.name,
         tier = tier,
         light = Util.resolve_constants(names.light),
         medium = Util.resolve_constants(names.medium),
         heavy = Util.resolve_constants(names.heavy),
     }
+
+    -- Interruptor del Tardigrado: apagado, se retira de todas las listas
+    if not TARDIGRADE_ENABLED then
+        for _, list in ipairs({ pool.light, pool.medium, pool.heavy }) do
+            for i = #list, 1, -1 do
+                if list[i] == TARDIGRADE_OBJ then table.remove(list, i) end
+            end
+        end
+    end
+    return pool
 end
 
 local function is_flying(object_id)
@@ -389,6 +406,10 @@ local function spawn_one(shrine, data, entry, index)
     end
 
     if not mob or not Instance.exists(mob) then return end
+
+    if TARDIGRADE_OBJ and entry.obj == TARDIGRADE_OBJ then
+        log.info(string.format("[RestoredCutContent] Tardigrado en la horda: pos=(%.0f,%.0f)", mob.x, mob.y))
+    end
 
     if entry.is_elite then
         local elite_id, is_blighted = choose_elite(data.allow_blighted, data.blighted_used)
