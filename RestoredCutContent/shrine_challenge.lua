@@ -26,9 +26,9 @@ local FRAME_COMBAT_A = 4        -- chispas sobre la estatua (103 px de alto, igu
 local FRAME_COMBAT_B = 5
 local FRAME_IDLE     = 10       -- estatua intacta (idem fotograma 0)
 
--- Carga: duracion de cada fotograma 0..6. Empieza lenta, se acelera y el pico (6) se
--- sostiene un poco mas, como una respiracion que se carga.
-local CHARGE_HOLDS = { 24, 19, 15, 13, 12, 12, 18 }
+-- Carga: duracion de cada fotograma 0..6 (unos 0,9 s en total). Empieza algo mas lenta,
+-- se acelera y el pico (6) se sostiene un poco mas antes del rayo.
+local CHARGE_HOLDS = { 11, 9, 7, 6, 6, 6, 9 }
 
 -- Rayo completo: { fotograma, frames de duracion }
 local BEAM_SEQUENCE = {
