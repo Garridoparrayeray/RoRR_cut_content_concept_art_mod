@@ -99,23 +99,16 @@ local SND_WIN    = gm.constants.wLevelUp
 
 local FLYING_NAMES = { "oWisp", "oWispB", "oJelly" }
 
--- Ajuste de vida de los enemigos creados por el altar. El motor aplica el escalado de
--- dificultad a los que genera el Director, pero quiza no a los que crea el mod, asi que
--- aqui se puede compensar. Cada enemigo escribe su vida en el log para decidir con datos.
---   HP_FACTOR_BY_OBJECT: multiplicador fijo por tipo de enemigo (nombre del objeto)
---   HP_PER_THREAT: vida extra por punto de amenaza por encima de 0.75. Dejar en 0: el motor
---     ya escala la vida al crear el enemigo (comprobado: 100 -> 113 con el tiempo)
-local HP_FACTOR_BY_OBJECT = { oMacT = 0.7 }
-local HP_PER_THREAT       = 0.0
-
 -- Macrobic Tardigrade (oMacT): enemigo descartado que sigue en los archivos del juego.
--- Aparece como enemigo medio en Bosque Desolado, Cavernas Humedas y Colmena. Es un
--- kamikaze: tras una pausa de carga pasa a su animacion de muerte, corre hacia el
--- jugador y explota si no se le mata antes.
+-- Es un kamikaze: tras una pausa de carga pasa a su animacion de muerte, corre hacia el
+-- jugador y explota si no se le mata antes. Por eso es una rareza: solo aparece en los
+-- mapas de Util.TARDIGRADE_BIOMES, y con una probabilidad por oleada.
+-- Su vida y su recompensa se ajustan en Util.ENEMY_TUNING.
 -- Si diera problemas (pantalla en blanco, excepciones), ponerlo en false.
-local TARDIGRADE_ENABLED = true
-local TARDIGRADE_OBJ     = gm.constants.oMacT
-local TARDIGRADE_MAX_PER_WAVE = 2   -- se lanza contra el jugador y explota: kamikaze
+local TARDIGRADE_ENABLED     = true
+local TARDIGRADE_OBJ         = gm.constants.oMacT
+local TARDIGRADE_WAVE_CHANCE = 0.25   -- probabilidad de que una oleada lleve uno
+local TARDIGRADE_SECOND_CHANCE = 0.20 -- probabilidad de un segundo (oleadas de 7 o mas)
 
 -- Bestiario por fase (nombres de objeto; se resuelven contra gm.constants)
 local POOL_NAMES = {
@@ -130,13 +123,13 @@ local POOL_NAMES = {
 -- esta aqui (stage de otro mod, por ejemplo) se usa el bestiario por fase de arriba.
 local BIOME_POOLS = {
     driedlake         = { name = "Lago Seco",              light = { "oLizard", "oWisp" },   medium = { "oCrab", "oSpitter" },  heavy = { "oLizard" } },
-    desolateforest    = { name = "Bosque Desolado",        light = { "oBug", "oLizard" },    medium = { "oBoar", "oSpitter", "oMacT" }, heavy = { "oLizard" } },
-    dampcaverns       = { name = "Cavernas Humedas",       light = { "oLizard", "oJelly" },  medium = { "oClay", "oMush", "oMacT" }, heavy = { "oGolem" } },
+    desolateforest    = { name = "Bosque Desolado", light = { "oBug", "oLizard" },    medium = { "oBoar", "oSpitter" }, heavy = { "oLizard" } },
+    dampcaverns       = { name = "Cavernas Humedas", light = { "oLizard", "oJelly" },  medium = { "oClay", "oMush" }, heavy = { "oGolem" } },
     skymeadow         = { name = "Pradera Celestial",      light = { "oWisp", "oJelly" },    medium = { "oSpitter", "oClay" },  heavy = { "oGolem" } },
     ancientvalley     = { name = "Valle Antiguo",          light = { "oLizard", "oClay" },   medium = { "oGolem", "oBison" },   heavy = { "oWispB", "oBison" } },
     sunkentombs       = { name = "Tumbas Hundidas",        light = { "oLizard", "oClay" },   medium = { "oGolem", "oSpitter" }, heavy = { "oWispB", "oBison" } },
     magmabarracks     = { name = "Cuartel de Magma",       light = { "oImp", "oSpider" },    medium = { "oImpM", "oGolem" },    heavy = { "oWispB", "oBison" } },
-    hivecluster       = { name = "Colmena",                light = { "oSpider", "oBug" },    medium = { "oImpM", "oGuard", "oMacT" }, heavy = { "oWispB", "oGolem" } },
+    hivecluster       = { name = "Colmena", light = { "oSpider", "oBug" },    medium = { "oImpM", "oGuard" }, heavy = { "oWispB", "oGolem" } },
     templeoftheelders = { name = "Templo de los Ancianos", light = { "oChild", "oImp" },     medium = { "oGuard", "oGolem" },   heavy = { "oGolemG", "oWispB" } },
 }
 
@@ -176,23 +169,15 @@ local function get_pool(stage_num)
         names = POOL_NAMES[tier]
     end
 
-    local pool = {
+    return {
         name = names.name,
         tier = tier,
         light = Util.resolve_constants(names.light),
         medium = Util.resolve_constants(names.medium),
         heavy = Util.resolve_constants(names.heavy),
+        tardigrade = TARDIGRADE_ENABLED and identifier ~= nil
+            and Util.TARDIGRADE_BIOMES[string.lower(identifier)] == true,
     }
-
-    -- Interruptor del Tardigrado: apagado, se retira de todas las listas
-    if not TARDIGRADE_ENABLED then
-        for _, list in ipairs({ pool.light, pool.medium, pool.heavy }) do
-            for i = #list, 1, -1 do
-                if list[i] == TARDIGRADE_OBJ then table.remove(list, i) end
-            end
-        end
-    end
-    return pool
 end
 
 local function is_flying(object_id)
@@ -353,21 +338,21 @@ local function plan_wave(pool, threat)
         end
     end
 
-    -- El Tardigrado se lanza contra el jugador y explota: no mas de TARDIGRADE_MAX_PER_WAVE
-    -- por oleada; los que sobren se sustituyen por otro enemigo medio del mapa
-    if TARDIGRADE_OBJ then
-        local others = {}
-        for _, object_id in ipairs(pool.medium) do
-            if object_id ~= TARDIGRADE_OBJ then table.insert(others, object_id) end
-        end
-        local seen = 0
-        for _, entry in ipairs(plan) do
-            if entry.obj == TARDIGRADE_OBJ then
-                seen = seen + 1
-                if seen > TARDIGRADE_MAX_PER_WAVE then
-                    entry.obj = Util.pick(others, fallback)
-                end
-            end
+    -- Con amenaza alta el Tardigrado puede ser un Alfa (jefe): lidera la oleada en el
+    -- primer hueco. La probabilidad sube con la amenaza (Util.boss_chance)
+    if pool.tardigrade and TARDIGRADE_OBJ and tier >= 3 and gm.random(1.0) < Util.boss_chance(threat) then
+        plan[1].obj = TARDIGRADE_OBJ
+        plan[1].variant = "boss"
+        plan[1].is_elite = false
+    end
+
+    -- El Tardigrado base es una rareza: solo en mapas que lo admiten, con una probabilidad
+    -- por oleada, en un hueco que no sea el primero (el pesado/lider), y un segundo
+    -- solo en oleadas grandes
+    if pool.tardigrade and TARDIGRADE_OBJ and #plan >= 5 and gm.random(1.0) < TARDIGRADE_WAVE_CHANCE then
+        plan[gm.irandom_range(2, #plan)].obj = TARDIGRADE_OBJ
+        if #plan >= 7 and gm.random(1.0) < TARDIGRADE_SECOND_CHANCE then
+            plan[gm.irandom_range(2, #plan)].obj = TARDIGRADE_OBJ
         end
     end
 
@@ -412,29 +397,6 @@ local function start_wave(data)
     log.info(string.format("[RestoredCutContent] Horda: %d enemigos (%s, amenaza %.2f)", #plan, pool.name, threat))
 end
 
--- Aplica el ajuste de vida (por tipo y por amenaza) y deja constancia en el log.
--- Se toca maxhp_base y se recalculan los stats: escribir maxhp directamente lo
--- sobrescribiria el siguiente recalculo.
-local function tune_enemy(mob, object_id, threat)
-    local name = tostring(object_id)
-    pcall(function()
-        name = tostring(gm.object_get_name(object_id))
-    end)
-
-    local actor = Instance.wrap(mob)
-    local before = actor.maxhp
-    local factor = (HP_FACTOR_BY_OBJECT[name] or 1.0) * (1 + HP_PER_THREAT * math.max(0, threat - 0.75))
-
-    if factor ~= 1.0 and type(actor.maxhp_base) == "number" then
-        actor.maxhp_base = actor.maxhp_base * factor
-        pcall(function() actor:recalculate_stats() end)
-        actor.hp = actor.maxhp
-    end
-
-    log.info(string.format("[RestoredCutContent] Enemigo %s: vida %.0f -> %.0f (x%.2f, amenaza %.2f)",
-        name, tonumber(before) or 0, tonumber(actor.maxhp) or 0, factor, threat))
-end
-
 -- Coloca un enemigo del plan junto al altar con un destello de aparicion
 local function spawn_one(shrine, data, entry, index)
     local ground_y = shrine.y
@@ -460,7 +422,10 @@ local function spawn_one(shrine, data, entry, index)
 
     if not mob or not Instance.exists(mob) then return end
 
-    tune_enemy(mob, entry.obj, data.threat)
+    Util.tune_enemy(mob, entry.obj, entry.variant)
+    if entry.variant == "boss" then
+        Util.chat("<r>[Altar de Desafío]</c> ¡Un Tardígrado Alfa se une al desafío!")
+    end
 
     if entry.is_elite then
         local elite_id, is_blighted = choose_elite(data.allow_blighted, data.blighted_used)

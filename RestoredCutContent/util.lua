@@ -301,6 +301,94 @@ function Util.gold_cost(base, per_threat)
     return math.floor(base * (1 + threat * per_threat))
 end
 
+-- Ajuste por tipo de enemigo creado por el mod (clave: nombre del objeto).
+--   hp:     multiplicador de vida maxima (aplicado sobre maxhp_base)
+--   reward: multiplicador de exp_worth, que fija la experiencia y el oro al matarlo
+-- El escalado por tiempo/dificultad ya lo aplica el motor al crear al enemigo
+-- (comprobado: el Tardigrado nacia con 100 y mas tarde con 113 de vida).
+--   scale:  tamano relativo (solo variantes grandes; ver el seguimiento de abajo)
+-- Las variantes (por ejemplo "boss") sustituyen a los valores base.
+Util.ENEMY_TUNING = {
+    oMacT = {
+        hp = 0.7, reward = 1.8,   -- mucha vida y se suicida: si lo matas, que compense
+        variants = {
+            boss = { hp = 3.0, reward = 4.5, scale = 1.35 },   -- Tardigrado Alfa
+        },
+    },
+}
+
+-- Tardigrado Alfa: umbral y probabilidad segun la amenaza
+local BOSS_MIN_THREAT  = 3.5
+local BOSS_CHANCE_BASE = 0.15
+local BOSS_CHANCE_STEP = 0.08   -- por punto de amenaza sobre el umbral
+local BOSS_CHANCE_MAX  = 0.60
+
+function Util.boss_chance(threat)
+    if threat < BOSS_MIN_THREAT then return 0 end
+    return math.min(BOSS_CHANCE_MAX, BOSS_CHANCE_BASE + (threat - BOSS_MIN_THREAT) * BOSS_CHANCE_STEP)
+end
+
+-- Enemigos con tamano propio. El motor reescribe image_xscale cada frame para girarlos
+-- (+1/-1), asi que el tamano se reaplica despues del paso, conservando el sentido.
+local scaled_enemies = {}
+
+Callback.add(Callback.TYPE.postStep, "RCC_Util_EnemyScale", function()
+    for i = #scaled_enemies, 1, -1 do
+        local entry = scaled_enemies[i]
+        if not Instance.exists(entry.inst) then
+            table.remove(scaled_enemies, i)
+        else
+            pcall(function()
+                local facing = 1
+                if entry.inst.image_xscale < 0 then facing = -1 end
+                entry.inst.image_xscale = facing * entry.scale
+                entry.inst.image_yscale = entry.scale
+            end)
+        end
+    end
+end)
+
+-- Aplica el ajuste a un enemigo recien creado y deja constancia en el log.
+-- variant (opcional): nombre de una variante de ENEMY_TUNING[objeto].variants
+function Util.tune_enemy(mob, object_id, variant)
+    local name = tostring(object_id)
+    pcall(function()
+        name = tostring(gm.object_get_name(object_id))
+    end)
+
+    local tuning = Util.ENEMY_TUNING[name] or {}
+    if variant and tuning.variants and tuning.variants[variant] then
+        tuning = tuning.variants[variant]
+    end
+    local hp_factor = tuning.hp or 1.0
+    local reward_factor = tuning.reward or 1.0
+
+    local actor = Instance.wrap(mob)
+    local hp_before = tonumber(actor.maxhp) or 0
+    local worth_before = actor.exp_worth
+
+    if hp_factor ~= 1.0 and type(actor.maxhp_base) == "number" then
+        -- Se toca maxhp_base y se recalculan los stats: escribir maxhp directamente
+        -- lo sobrescribiria el siguiente recalculo
+        actor.maxhp_base = actor.maxhp_base * hp_factor
+        pcall(function() actor:recalculate_stats() end)
+        actor.hp = actor.maxhp
+    end
+
+    if reward_factor ~= 1.0 and type(worth_before) == "number" then
+        actor.exp_worth = worth_before * reward_factor
+    end
+
+    if tuning.scale and tuning.scale ~= 1.0 then
+        table.insert(scaled_enemies, { inst = mob, scale = tuning.scale })
+        Util.snap_to_ground(mob, 80, 40)
+    end
+
+    log.info(string.format("[RestoredCutContent] Enemigo %s%s: vida %.0f -> %.0f (x%.2f), recompensa %s -> %s (x%.2f), tamano x%.2f",
+        name, variant and (" [" .. variant .. "]") or "", hp_before, tonumber(actor.maxhp) or 0, hp_factor,
+        tostring(worth_before), tostring(actor.exp_worth), reward_factor, tuning.scale or 1.0))
+end
+
 -- Devuelve la lista de constantes de GameMaker que existen realmente.
 -- Evita los huecos nil que cortan los ipairs en las tablas de enemigos.
 function Util.resolve_constants(names)
@@ -400,6 +488,17 @@ local function current_room_width()
     end)
     return width
 end
+
+-- Expuestos para otros modulos que colocan cosas en el mapa
+Util.room_width = current_room_width
+Util.has_firm_ground = has_firm_ground
+
+-- Mapas donde el Tardigrado puede aparecer (bestiario de las hordas y aparicion natural)
+Util.TARDIGRADE_BIOMES = {
+    desolateforest = true,
+    dampcaverns = true,
+    hivecluster = true,
+}
 
 local function existing_ids(object_id)
     local ids = {}
