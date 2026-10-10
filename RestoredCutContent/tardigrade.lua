@@ -20,6 +20,8 @@ local MONITOR_INTERVAL = 90     -- frames entre lineas del log
 
 local watched = nil             -- instancia observada
 local watch_timer = 0
+local last_sprite = nil
+local last_player_hp = nil
 
 -- Lee un campo sin que un campo inexistente rompa la observacion
 local function read_field(inst, field)
@@ -61,6 +63,8 @@ local function spawn_tardigrade(player)
     Util.snap_to_ground(inst, 80, 40)
     watched = inst
     watch_timer = 0
+    last_sprite = nil
+    last_player_hp = nil
 
     log.info("[RestoredCutContent] Tardigrado creado: " .. describe(inst))
     Util.chat("<g>[TARDIGRADO]</c> Creado. El log registra su comportamiento durante 25 s.")
@@ -76,6 +80,28 @@ local function update_monitor()
         Util.chat("<y>[TARDIGRADO]</c> Ya no existe (murio o se destruyo).")
         watched = nil
         return
+    end
+
+    -- Cada cambio de animacion (para ver cuando explota y cuanto dura cada fase)
+    local sprite = sprite_name(watched)
+    local player = Instance.find_all(gm.constants.oP)[1]
+    local distance = -1
+    if player then
+        distance = math.sqrt((player.x - watched.x) ^ 2 + (player.y - watched.y) ^ 2)
+    end
+    if sprite ~= last_sprite then
+        log.info(string.format("[RestoredCutContent] Tardigrado t=%d: animacion %s -> %s (distancia al jugador %.0f px)",
+            watch_timer, tostring(last_sprite), sprite, distance))
+        last_sprite = sprite
+    end
+
+    -- Dano al jugador: atribuido a la animacion en curso
+    if player and type(player.hp) == "number" then
+        if last_player_hp and player.hp < last_player_hp then
+            log.info(string.format("[RestoredCutContent] Tardigrado t=%d: el jugador pierde %.1f de vida (sprite %s, distancia %.0f px)",
+                watch_timer, last_player_hp - player.hp, sprite, distance))
+        end
+        last_player_hp = player.hp
     end
 
     if watch_timer % MONITOR_INTERVAL == 0 then

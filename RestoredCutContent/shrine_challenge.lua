@@ -99,6 +99,14 @@ local SND_WIN    = gm.constants.wLevelUp
 
 local FLYING_NAMES = { "oWisp", "oWispB", "oJelly" }
 
+-- Ajuste de vida de los enemigos creados por el altar. El motor aplica el escalado de
+-- dificultad a los que genera el Director, pero quiza no a los que crea el mod, asi que
+-- aqui se puede compensar. Cada enemigo escribe su vida en el log para decidir con datos.
+--   HP_FACTOR_BY_OBJECT: multiplicador fijo por tipo de enemigo (nombre del objeto)
+--   HP_PER_THREAT: vida extra por punto de amenaza por encima de 0.75 (0 = desactivado)
+local HP_FACTOR_BY_OBJECT = { oMacT = 0.7 }
+local HP_PER_THREAT       = 0.0
+
 -- Macrobic Tardigrade (oMacT): enemigo descartado que sigue en los archivos del juego.
 -- Aparece como enemigo medio en Bosque Desolado, Cavernas Humedas y Colmena.
 -- Si diera problemas (pantalla en blanco, excepciones), ponerlo en false.
@@ -382,6 +390,29 @@ local function start_wave(data)
     log.info(string.format("[RestoredCutContent] Horda: %d enemigos (%s, amenaza %.2f)", #plan, pool.name, threat))
 end
 
+-- Aplica el ajuste de vida (por tipo y por amenaza) y deja constancia en el log.
+-- Se toca maxhp_base y se recalculan los stats: escribir maxhp directamente lo
+-- sobrescribiria el siguiente recalculo.
+local function tune_enemy(mob, object_id, threat)
+    local name = tostring(object_id)
+    pcall(function()
+        name = tostring(gm.object_get_name(object_id))
+    end)
+
+    local actor = Instance.wrap(mob)
+    local before = actor.maxhp
+    local factor = (HP_FACTOR_BY_OBJECT[name] or 1.0) * (1 + HP_PER_THREAT * math.max(0, threat - 0.75))
+
+    if factor ~= 1.0 and type(actor.maxhp_base) == "number" then
+        actor.maxhp_base = actor.maxhp_base * factor
+        pcall(function() actor:recalculate_stats() end)
+        actor.hp = actor.maxhp
+    end
+
+    log.info(string.format("[RestoredCutContent] Enemigo %s: vida %.0f -> %.0f (x%.2f, amenaza %.2f)",
+        name, tonumber(before) or 0, tonumber(actor.maxhp) or 0, factor, threat))
+end
+
 -- Coloca un enemigo del plan junto al altar con un destello de aparicion
 local function spawn_one(shrine, data, entry, index)
     local ground_y = shrine.y
@@ -407,9 +438,7 @@ local function spawn_one(shrine, data, entry, index)
 
     if not mob or not Instance.exists(mob) then return end
 
-    if TARDIGRADE_OBJ and entry.obj == TARDIGRADE_OBJ then
-        log.info(string.format("[RestoredCutContent] Tardigrado en la horda: pos=(%.0f,%.0f)", mob.x, mob.y))
-    end
+    tune_enemy(mob, entry.obj, data.threat)
 
     if entry.is_elite then
         local elite_id, is_blighted = choose_elite(data.allow_blighted, data.blighted_used)
