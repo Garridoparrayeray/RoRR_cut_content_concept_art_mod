@@ -103,15 +103,19 @@ local FLYING_NAMES = { "oWisp", "oWispB", "oJelly" }
 -- dificultad a los que genera el Director, pero quiza no a los que crea el mod, asi que
 -- aqui se puede compensar. Cada enemigo escribe su vida en el log para decidir con datos.
 --   HP_FACTOR_BY_OBJECT: multiplicador fijo por tipo de enemigo (nombre del objeto)
---   HP_PER_THREAT: vida extra por punto de amenaza por encima de 0.75 (0 = desactivado)
+--   HP_PER_THREAT: vida extra por punto de amenaza por encima de 0.75. Dejar en 0: el motor
+--     ya escala la vida al crear el enemigo (comprobado: 100 -> 113 con el tiempo)
 local HP_FACTOR_BY_OBJECT = { oMacT = 0.7 }
 local HP_PER_THREAT       = 0.0
 
 -- Macrobic Tardigrade (oMacT): enemigo descartado que sigue en los archivos del juego.
--- Aparece como enemigo medio en Bosque Desolado, Cavernas Humedas y Colmena.
+-- Aparece como enemigo medio en Bosque Desolado, Cavernas Humedas y Colmena. Es un
+-- kamikaze: tras una pausa de carga pasa a su animacion de muerte, corre hacia el
+-- jugador y explota si no se le mata antes.
 -- Si diera problemas (pantalla en blanco, excepciones), ponerlo en false.
 local TARDIGRADE_ENABLED = true
 local TARDIGRADE_OBJ     = gm.constants.oMacT
+local TARDIGRADE_MAX_PER_WAVE = 2   -- se lanza contra el jugador y explota: kamikaze
 
 -- Bestiario por fase (nombres de objeto; se resuelven contra gm.constants)
 local POOL_NAMES = {
@@ -346,6 +350,24 @@ local function plan_wave(pool, threat)
             local list = (i == 1) and pool.heavy or pool.medium
             -- Los dos primeros siempre son elite; el resto, con buena probabilidad
             add(Util.pick(list, fallback), i <= 2 or gm.random(1.0) < 0.35)
+        end
+    end
+
+    -- El Tardigrado se lanza contra el jugador y explota: no mas de TARDIGRADE_MAX_PER_WAVE
+    -- por oleada; los que sobren se sustituyen por otro enemigo medio del mapa
+    if TARDIGRADE_OBJ then
+        local others = {}
+        for _, object_id in ipairs(pool.medium) do
+            if object_id ~= TARDIGRADE_OBJ then table.insert(others, object_id) end
+        end
+        local seen = 0
+        for _, entry in ipairs(plan) do
+            if entry.obj == TARDIGRADE_OBJ then
+                seen = seen + 1
+                if seen > TARDIGRADE_MAX_PER_WAVE then
+                    entry.obj = Util.pick(others, fallback)
+                end
+            end
         end
     end
 
