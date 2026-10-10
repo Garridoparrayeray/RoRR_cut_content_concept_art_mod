@@ -3,7 +3,7 @@
 -- Funciones compartidas por todos los modulos de RestoredCutContent
 -- ============================================================================
 
-local Util = {}
+local Util = RCC_UTIL or {}   -- misma tabla aunque el fichero se ejecute de nuevo
 
 -- GameMaker devuelve 1.0 / 0.0 en lugar de booleanos (0.0 es "true" en Lua)
 function Util.is_true(value)

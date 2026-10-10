@@ -145,8 +145,7 @@ local function configure_shrine(shrine)
     get_data(shrine)
 end
 
--- Expuesto para las herramientas de depuracion (F9)
-function Util.spawn_challenge_shrine(x, y)
+local function spawn_shrine_at(x, y)
     local shrine = gm.instance_create(x, y, SHRINE_OBJ)
     if not shrine or not Instance.exists(shrine) then
         log.error("[RestoredCutContent] No se pudo crear oShrine6")
@@ -155,6 +154,25 @@ function Util.spawn_challenge_shrine(x, y)
     configure_shrine(shrine)
     return shrine
 end
+
+-- Tecla de prueba F9: altar de desafio a la izquierda del jugador
+local KEY_DEBUG_SPAWN = 120
+
+Callback.add(Callback.TYPE.postStep, "ChallengeShrine_DebugSpawn", function()
+    if gm.keyboard_check_pressed(KEY_DEBUG_SPAWN) ~= 1.0 then return end
+    if gm._mod_net_isClient() then return end
+
+    local player = Instance.find_all(gm.constants.oP)[1]
+    if not player then return end
+
+    local ok, result = pcall(spawn_shrine_at, player.x - 60, player.y)
+    if ok and result then
+        Util.chat("<g>[DEBUG F9]</c> Altar de Desafío creado ($" .. tostring(result.cost) .. "). Pulsa E para activarlo.")
+        log.info(string.format("[RestoredCutContent] F9: altar de desafio en (%.1f, %.1f), coste %s", result.x, result.y, tostring(result.cost)))
+    else
+        log.error("[RestoredCutContent] F9 fallo: " .. tostring(result))
+    end
+end)
 
 Callback.add(Callback.TYPE.onStageStart, "ChallengeShrine_ResetStage", function()
     shrine_spawned_this_stage = false

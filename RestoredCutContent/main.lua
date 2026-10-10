@@ -23,7 +23,7 @@ local function load_modules()
         package.loaded[name] = nil
         require(name)
     end
-    log.info("[RestoredCutContent] Modulos cargados: " .. #MODULES)
+    log.info("[RestoredCutContent] Modulos cargados: " .. #MODULES .. " (build 2026-10-10-c: F5 empoderamiento, F9 desafio, F6 dios, F7 matar, F8 oro)")
 end
 
 Initialize(load_modules)

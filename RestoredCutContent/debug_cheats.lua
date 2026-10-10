@@ -1,8 +1,6 @@
 -- ============================================================================
 -- debug_cheats.lua
 -- Herramientas de prueba de RestoredCutContent
---   F5  Altar de Empoderamiento junto al jugador (a la derecha)
---   F9  Altar de Desafio junto al jugador (a la izquierda)
 --   F6  Modo Dios (invulnerable, vida maxima, sin cooldowns)
 --   F7  Matar a todos los enemigos (por la via normal de dano)
 --   F8  +1000 de oro
@@ -11,7 +9,8 @@
 local loaded = require("util.lua")
 local Util = (type(loaded) == "table") and loaded or RCC_UTIL
 
-local KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9 = 116, 117, 118, 119, 120
+-- F5 (empoderamiento) y F9 (desafio) los gestiona cada modulo de altar
+local KEY_F6, KEY_F7, KEY_F8 = 117, 118, 119
 local GOLD_AMOUNT = 1000
 local LETHAL_COEFFICIENT = 1000000
 
@@ -19,21 +18,6 @@ local god_mode = false
 
 local function pressed(key)
     return gm.keyboard_check_pressed(key) == 1.0
-end
-
-local function spawn_empower_shrine(player)
-    if not Util.spawn_empower_shrine then return end
-    if Util.spawn_empower_shrine(player.x + 60, player.y) then
-        Util.chat("<g>[DEBUG F5]</c> Altar de Empoderamiento creado. Pulsa E para probarlo.")
-    end
-end
-
-local function spawn_challenge_shrine(player)
-    if not Util.spawn_challenge_shrine then return end
-    local shrine = Util.spawn_challenge_shrine(player.x - 60, player.y)
-    if shrine then
-        Util.chat("<g>[DEBUG F9]</c> Altar de Desafío creado ($" .. tostring(shrine.cost) .. "). F8 da oro; pulsa E para activarlo.")
-    end
 end
 
 local function toggle_god_mode(player)
@@ -93,14 +77,6 @@ Callback.add(Callback.TYPE.postStep, "DebugCheats_Loop", function()
     local player = players[1]
     if not player or not player:exists() then return end
 
-    if pressed(KEY_F5) then
-        pcall(spawn_empower_shrine, player)
-    end
-
-    if pressed(KEY_F9) then
-        pcall(spawn_challenge_shrine, player)
-    end
-
     if pressed(KEY_F6) then
         toggle_god_mode(player)
     end
@@ -123,4 +99,4 @@ Callback.add(Callback.TYPE.postStep, "DebugCheats_Loop", function()
     end
 end)
 
-log.info("[RestoredCutContent] debug_cheats.lua cargado (F5 empoderamiento, F9 desafio, F6 dios, F7 matar, F8 oro)")
+log.info("[RestoredCutContent] debug_cheats.lua cargado (F6 dios, F7 matar, F8 oro)")

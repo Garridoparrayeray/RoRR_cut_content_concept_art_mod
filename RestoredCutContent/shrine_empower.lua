@@ -117,8 +117,23 @@ local function spawn_shrine_at(x, y)
     return shrine
 end
 
--- Expuesto para las herramientas de depuracion (F5)
-Util.spawn_empower_shrine = spawn_shrine_at
+-- Tecla de prueba F5: altar de empoderamiento a la derecha del jugador
+local KEY_DEBUG_SPAWN = 116
+
+Callback.add(Callback.TYPE.postStep, "EmpowerShrine_DebugSpawn", function()
+    if gm.keyboard_check_pressed(KEY_DEBUG_SPAWN) ~= 1.0 then return end
+    if gm._mod_net_isClient() then return end
+
+    local player = Instance.find_all(gm.constants.oP)[1]
+    if not player then return end
+
+    local ok, result = pcall(spawn_shrine_at, player.x + 60, player.y)
+    if ok and result then
+        Util.chat("<g>[DEBUG F5]</c> Altar de Empoderamiento creado. Pulsa E para probarlo.")
+    else
+        log.error("[RestoredCutContent] F5 fallo: " .. tostring(result))
+    end
+end)
 
 -- ----------------------------------------------------------------------------
 -- Generacion por fase
