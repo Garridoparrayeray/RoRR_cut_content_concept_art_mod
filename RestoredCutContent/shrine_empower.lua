@@ -94,6 +94,7 @@ local function configure_shrine(shrine)
     shrine.visible     = true
     shrine.image_index = 0
     shrine.image_speed = 0
+    shrine.image_blend = Util.BLEND_NORMAL
     if SHRINE_SPRITE then
         shrine.sprite_index = SHRINE_SPRITE
     end
@@ -154,8 +155,19 @@ Callback.add(Callback.TYPE.postStep, "EmpowerShrine_SpawnLoop", function()
 end)
 
 -- ----------------------------------------------------------------------------
--- Activacion, resplandor y rotura
+-- Activacion, resplandor y derrumbe
+--   idle > glowing (3 s) > breaking (2,5 s) > spent
 -- ----------------------------------------------------------------------------
+local GLOW_HOLD      = 14    -- frames por fotograma del halo
+local GLOW_PULSE     = 50    -- frames por latido del brillo
+local CRUMBLE_FRAMES = 150
+local CRUMBLE_SHAKE  = 3
+local CRUMBLE_SPARKS = 18
+
+local COLOR_WHITE = { 255, 255, 255 }
+local COLOR_GOLD  = { 255, 205, 70 }
+local COLOR_RUIN  = { 110, 110, 110 }
+
 local function find_activator(shrine)
     local activator = nil
     pcall(function()
@@ -183,16 +195,58 @@ local function start_blessing(shrine, data)
     end
 
     shrine.image_index = frame_layout(shrine).glow_from
-    shrine.image_speed = 0.15
+    shrine.image_speed = 0
 end
 
-local function shatter(shrine, data, layout)
-    data.state = STATE_BREAKING
-    shrine.image_index = layout.break_from
-    shrine.image_speed = 0.15
+-- Halo: fotogramas del halo uno a uno, brillo dorado que late y crece, chispas que se aceleran
+local function update_glowing(shrine, data, layout)
+    data.glow_timer = data.glow_timer + 1
+    shrine.active = 2
 
-    Util.break_effects(shrine)
-    Util.chat("<y>[Altar de Empoderamiento]</c> ¡El altar canaliza toda su energía y se quiebra!")
+    local t = data.glow_timer
+    local progress = math.min(1, t / GLOW_FRAMES)
+    local halo_frames = math.max(1, layout.break_from - layout.glow_from)
+
+    shrine.image_speed = 0
+    shrine.image_index = layout.glow_from + (math.floor(t / GLOW_HOLD) % halo_frames)
+
+    local pulse = (math.sin(t * 2 * math.pi / GLOW_PULSE) + 1) / 2
+    shrine.image_blend = Util.mix_blend(COLOR_WHITE, COLOR_GOLD, progress * (0.55 + 0.45 * pulse))
+
+    local interval = math.max(6, math.floor(SPARK_INTERVAL * (1 - progress * 0.7)))
+    if t % interval == 0 then
+        Util.spark_at(shrine.x + gm.random_range(-10, 10), shrine.y - 50)
+    end
+
+    if t >= GLOW_FRAMES then
+        data.state = STATE_BREAKING
+        Util.play_sound(gm.constants.wChest1, 0.8, 0.7, shrine.x, shrine.y)
+        Util.chat("<y>[Altar de Empoderamiento]</c> El altar no soporta tanta energía...")
+    end
+end
+
+-- Derrumbe lento: temblor creciente, grietas cada vez mas seguidas y rotura final
+local function update_breaking(shrine, data, layout)
+    shrine.active = 3
+
+    local progress = math.min(1, ((data.crumble_t or 0) + 1) / CRUMBLE_FRAMES)
+    shrine.image_blend = Util.mix_blend(COLOR_GOLD, COLOR_RUIN, progress)
+
+    local finished = Util.crumble_step(shrine, data, {
+        duration = CRUMBLE_FRAMES,
+        frame_from = layout.break_from,
+        frame_to = math.max(layout.break_from, layout.last - 1),
+        max_shake = CRUMBLE_SHAKE,
+        spark_interval = CRUMBLE_SPARKS,
+    })
+
+    if finished then
+        data.state = STATE_SPENT
+        shrine.image_index = layout.last
+        shrine.image_blend = Util.rgb(COLOR_RUIN[1], COLOR_RUIN[2], COLOR_RUIN[3])
+        Util.break_effects(shrine)
+        Util.chat("<y>[Altar de Empoderamiento]</c> ¡El altar se hace pedazos!")
+    end
 end
 
 local function update_shrine(shrine)
@@ -205,28 +259,10 @@ local function update_shrine(shrine)
         end
 
     elseif data.state == STATE_GLOWING then
-        data.glow_timer = data.glow_timer + 1
-        shrine.active = 2
-
-        if shrine.image_index >= layout.break_from then
-            shrine.image_index = layout.glow_from
-        end
-
-        if data.glow_timer % SPARK_INTERVAL == 0 and gm.constants.oEfSparks then
-            gm.instance_create(shrine.x, shrine.y - 50, gm.constants.oEfSparks)
-        end
-
-        if data.glow_timer >= GLOW_FRAMES then
-            shatter(shrine, data, layout)
-        end
+        update_glowing(shrine, data, layout)
 
     elseif data.state == STATE_BREAKING then
-        shrine.active = 3
-        if shrine.image_index >= layout.last then
-            shrine.image_index = layout.last
-            shrine.image_speed = 0
-            data.state = STATE_SPENT
-        end
+        update_breaking(shrine, data, layout)
 
     else
         -- Ruinas inertes: impedir cualquier reinteraccion
@@ -240,9 +276,7 @@ end
 local function update_aura(player)
     if frame_counter % AURA_INTERVAL ~= 0 then return end
     if player:buff_stack_count(buff_empower) <= 0 then return end
-    if gm.constants.oEfSparks then
-        gm.instance_create(player.x + gm.random_range(-8, 8), player.y - 12, gm.constants.oEfSparks)
-    end
+    Util.spark_at(player.x + gm.random_range(-8, 8), player.y - 12)
 end
 
 Callback.add(Callback.TYPE.postStep, "EmpowerShrine_Update", function()

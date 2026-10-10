@@ -15,21 +15,36 @@ local Util = (type(loaded) == "table") and loaded or RCC_UTIL
 local SHRINE_OBJ    = gm.constants.oShrine6 or 624
 local SHRINE_SPRITE = gm.constants.sShrine6
 
-local FRAME_IMPACT   = 6.5   -- a partir de aqui cae el rayo y se invoca la horda
-local FRAME_BEAM     = 7.0
-local FRAME_LOOP_MIN = 5.0   -- solo fotogramas 5 y 6 (chispas azules): azul constante durante el combate
-local FRAME_LOOP_MAX = 6.95
-local FRAME_FADE     = 8.0
-local FRAME_FADE_END = 9.8
-local FRAME_DEAD     = 10
+-- Todos los fotogramas y tiempos de la animacion estan aqui para ajustarlos
+-- sin tocar la logica. Los tiempos son frames (60 = 1 segundo).
+local FRAME_CHARGE_LAST = 6     -- la carga recorre 0..6 de uno en uno
+local FRAME_BEAM        = 7     -- rayo vertical: solo al invocar
+local FRAME_COMBAT      = 6     -- fotograma fijo con chispas azules durante el combate
+local FRAME_FADE_FROM   = 8     -- disipacion 8..9
+local FRAME_FADE_LAST   = 9
+local FRAME_DEAD        = 10    -- estatua apagada
 
-local RUIN_BLEND = 5263440   -- gris oscuro (0x505050) para las ruinas
+local CHARGE_HOLD     = 14      -- frames que se mantiene cada fotograma de carga
+local BEAM_HOLD       = 30      -- duracion del rayo
+local FADE_HOLD       = 24      -- frames por fotograma de disipacion
+local CRUMBLE_FRAMES  = 150     -- derrumbe final (2,5 s)
+local CRUMBLE_SHAKE   = 2.5     -- temblor maximo en px
+local CRUMBLE_SPARKS  = 22      -- intervalo inicial entre grietas
+
+local BLEND_CHARGE_FROM = { 255, 255, 255 }
+local BLEND_CHARGE_TO   = { 120, 190, 255 }
+local BLEND_COMBAT_A    = { 190, 225, 255 }   -- pulso azul claro
+local BLEND_COMBAT_B    = { 70, 140, 255 }    -- pulso azul intenso
+local BLEND_RUIN        = Util.rgb(80, 80, 80)
+
+local PULSE_PERIOD      = 70    -- frames por latido del tinte
+local HEARTBEAT_FRAMES  = 120   -- aro de energia hacia el cielo cada 2 s
+local SPARK_FRAMES      = 18
 
 local COST_BASE        = 35   -- oro con amenaza 0
 local COST_PER_THREAT  = 0.6   -- cada punto de amenaza suma el 60% del coste base
 local COST_REFRESH     = 30    -- frames entre recalculos mientras nadie lo activa
 
-local BEAM_HOLD_FRAMES  = 24
 local GRACE_FRAMES      = 60
 local BLIGHTED_MIN_THREAT = 4.5
 local BLIGHTED_MIN_STAGE  = 3
@@ -57,11 +72,8 @@ local function get_data(shrine)
     local id = shrine.id
     if not challenge_data[id] then
         challenge_data[id] = {
-            started = false,
-            fight_active = false,
-            completed = false,
-            fading_out = false,
-            beam_timer = 0,
+            phase = "idle",     -- idle > charging > beam > combat > fading > crumbling > ruin
+            timer = 0,
             grace_timer = 0,
             mobs = {},
             alive_count = 0,
@@ -138,6 +150,7 @@ local function configure_shrine(shrine)
     shrine.visible     = true
     shrine.image_index = 0
     shrine.image_speed = 0
+    shrine.image_blend = Util.BLEND_NORMAL
     if SHRINE_SPRITE then
         shrine.sprite_index = SHRINE_SPRITE
     end
@@ -363,42 +376,73 @@ end
 
 -- ----------------------------------------------------------------------------
 -- Maquina de estados del altar
+--   idle > charging > beam > combat > fading > crumbling > ruin
 -- ----------------------------------------------------------------------------
 local function begin_charge(shrine, data)
-    data.started = true
+    data.phase = "charging"
+    data.timer = 0
     shrine.active = 2   -- bloquea nuevas interacciones
     shrine.image_index = 0
-    shrine.image_speed = 0.2
+    shrine.image_speed = 0
     Util.play_sound(SND_CHARGE, 0.9, 1.1, shrine.x, shrine.y)
     Util.chat("<y>[Altar de Desafío]</c> ¡El altar canaliza energía celestial...!")
 end
 
-local function begin_fight(shrine, data)
-    data.fight_active = true
-    data.beam_timer = 0
-    data.grace_timer = 0
-
-    -- Rayo vertical: un unico fotograma congelado, sin animacion
+local function begin_beam(shrine, data)
+    data.phase = "beam"
+    data.timer = 0
     shrine.image_index = FRAME_BEAM
     shrine.image_speed = 0
+    shrine.image_blend = Util.BLEND_NORMAL
     Util.play_sound(SND_STRIKE, 1.0, 1.0, shrine.x, shrine.y)
-
+    pcall(function()
+        shrine:screen_shake(4)
+        if gm.constants.oEfCircle then
+            gm.instance_create(shrine.x, shrine.y - 40, gm.constants.oEfCircle)
+        end
+    end)
     spawn_wave(shrine, data)
 end
 
-local function keep_sparking(shrine, data)
-    if data.beam_timer < BEAM_HOLD_FRAMES then
-        data.beam_timer = data.beam_timer + 1
-        shrine.image_index = FRAME_BEAM
-        shrine.image_speed = 0
-        return
+-- Carga: fotogramas 0..6 de uno en uno, el tinte vira a azul y las chispas se aceleran
+local function update_charging(shrine, data)
+    data.timer = data.timer + 1
+    local total = CHARGE_HOLD * (FRAME_CHARGE_LAST + 1)
+    local progress = math.min(1, data.timer / total)
+
+    shrine.image_index = math.min(FRAME_CHARGE_LAST, math.floor(data.timer / CHARGE_HOLD))
+    shrine.image_blend = Util.mix_blend(BLEND_CHARGE_FROM, BLEND_CHARGE_TO, progress)
+    Util.shake(shrine, data, 0.8 * progress)
+
+    local interval = math.max(5, math.floor(SPARK_FRAMES * 1.5 * (1 - progress)))
+    if data.timer % interval == 0 then
+        Util.spark_at(shrine.x + gm.random_range(-10, 10), shrine.y - gm.random_range(15, 55))
     end
 
-    -- Despues del rayo: aura azul entre los fotogramas 5 y 6, nunca el 7 ni los anteriores
-    shrine.image_speed = 0.08
-    if shrine.image_index >= FRAME_LOOP_MAX or shrine.image_index < FRAME_LOOP_MIN then
-        shrine.image_index = FRAME_LOOP_MIN
+    if data.timer >= total then
+        Util.shake_end(shrine, data)
+        begin_beam(shrine, data)
     end
+end
+
+-- Rayo: un unico fotograma congelado, sin tinte
+local function update_beam(shrine, data)
+    data.timer = data.timer + 1
+    shrine.image_index = FRAME_BEAM
+    shrine.image_speed = 0
+    if data.timer >= BEAM_HOLD then
+        data.phase = "combat"
+        data.timer = 0
+        data.grace_timer = 0
+    end
+end
+
+local function victory(shrine, data)
+    data.phase = "fading"
+    data.timer = 0
+    Util.play_sound(SND_WIN, 1.0, 1.0, shrine.x, shrine.y)
+    Util.chat("<g>[Altar de Desafío]</c> ¡Horda derrotada! El altar entrega su poder...")
+    give_reward(shrine, data)
 end
 
 local function track_enemies(shrine, data)
@@ -420,58 +464,100 @@ local function track_enemies(shrine, data)
     end
 
     if alive == 0 and data.initial_count > 0 then
-        data.completed = true
-        data.fight_active = false
-        data.fading_out = true
+        victory(shrine, data)
+    end
+end
 
-        shrine.image_index = FRAME_FADE
-        shrine.image_speed = 0.25
+-- Combate: fotograma fijo + latido de color + chispas + aro de energia periodico.
+-- Mientras el altar late en azul, el desafio sigue en pie.
+local function update_combat(shrine, data)
+    data.timer = data.timer + 1
 
-        Util.play_sound(SND_WIN, 1.0, 1.0, shrine.x, shrine.y)
-        Util.chat("<g>[Altar de Desafío]</c> ¡Horda derrotada! El altar se apaga y entrega tu recompensa.")
-        give_reward(shrine, data)
+    shrine.image_index = FRAME_COMBAT
+    shrine.image_speed = 0
+    shrine.image_blend = Util.pulse_blend(data.timer, PULSE_PERIOD, BLEND_COMBAT_A, BLEND_COMBAT_B)
+
+    if data.timer % SPARK_FRAMES == 0 then
+        Util.spark_at(shrine.x + gm.random_range(-12, 12), shrine.y - gm.random_range(20, 60))
+    end
+    if data.timer % HEARTBEAT_FRAMES == 0 and gm.constants.oEfCircle then
+        pcall(function()
+            gm.instance_create(shrine.x, shrine.y - 40, gm.constants.oEfCircle)
+        end)
+    end
+
+    track_enemies(shrine, data)
+end
+
+-- Disipacion: 8 y 9 con la misma duracion, el azul se apaga gradualmente
+local function update_fading(shrine, data)
+    data.timer = data.timer + 1
+    local total = FADE_HOLD * (FRAME_FADE_LAST - FRAME_FADE_FROM + 1)
+    local progress = math.min(1, data.timer / total)
+
+    shrine.image_index = math.min(FRAME_FADE_LAST, FRAME_FADE_FROM + math.floor(data.timer / FADE_HOLD))
+    shrine.image_speed = 0
+    shrine.image_blend = Util.mix_blend(BLEND_COMBAT_B, BLEND_CHARGE_FROM, progress)
+
+    if data.timer >= total then
+        data.phase = "crumbling"
+        data.timer = 0
+    end
+end
+
+-- Derrumbe: temblor creciente, grietas cada vez mas seguidas y oscurecido gradual
+local function update_crumbling(shrine, data)
+    local progress = math.min(1, ((data.crumble_t or 0) + 1) / CRUMBLE_FRAMES)
+    shrine.image_blend = Util.mix_blend(BLEND_CHARGE_FROM, BLEND_RUIN, progress)
+
+    local finished = Util.crumble_step(shrine, data, {
+        duration = CRUMBLE_FRAMES,
+        frame_from = FRAME_FADE_LAST,
+        frame_to = FRAME_DEAD,
+        max_shake = CRUMBLE_SHAKE,
+        spark_interval = CRUMBLE_SPARKS,
+    })
+
+    if finished then
+        data.phase = "ruin"
+        shrine.image_index = FRAME_DEAD
+        shrine.image_blend = BLEND_RUIN
+        Util.break_effects(shrine)
+        Util.chat("<y>[Altar de Desafío]</c> El altar se quiebra tras entregar su poder.")
     end
 end
 
 local function update_shrine(shrine)
     local data = get_data(shrine)
+    local phase = data.phase
 
-    -- El precio sube con el avance del mapa hasta que alguien lo paga
-    if not data.started and not data.completed then
+    if phase == "idle" then
+        -- El precio sube con el avance del mapa hasta que alguien lo paga
         data.cost_timer = (data.cost_timer or 0) + 1
         if data.cost_timer >= COST_REFRESH then
             data.cost_timer = 0
             shrine.cost = current_cost()
         end
-    end
-
-    if not data.started and not data.completed and (shrine.active == 1 or shrine.active == 2) then
-        begin_charge(shrine, data)
-    end
-
-    if data.started and not data.fight_active and not data.completed then
-        if shrine.image_index >= FRAME_IMPACT then
-            begin_fight(shrine, data)
+        if shrine.active == 1 or shrine.active == 2 then
+            begin_charge(shrine, data)
         end
-    end
 
-    if data.fight_active then
-        keep_sparking(shrine, data)
-        track_enemies(shrine, data)
-    end
-
-    -- Fin de la disipacion: el altar se quiebra y queda como ruina oscurecida
-    if data.fading_out and shrine.image_index >= FRAME_FADE_END then
-        shrine.image_index = FRAME_DEAD
+    elseif phase == "charging" then
+        update_charging(shrine, data)
+    elseif phase == "beam" then
+        update_beam(shrine, data)
+    elseif phase == "combat" then
+        update_combat(shrine, data)
+    elseif phase == "fading" then
+        update_fading(shrine, data)
+    elseif phase == "crumbling" then
+        update_crumbling(shrine, data)
+    else
+        -- Ruina inerte
+        shrine.active = 3
         shrine.image_speed = 0
-        shrine.image_blend = RUIN_BLEND
-        data.fading_out = false
-        Util.break_effects(shrine)
-        Util.chat("<y>[Altar de Desafío]</c> El altar se quiebra tras entregar su poder.")
-    end
-
-    if data.completed then
-        shrine.active = 3   -- inerte permanentemente
+        shrine.image_index = FRAME_DEAD
+        shrine.image_blend = BLEND_RUIN
     end
 end
 

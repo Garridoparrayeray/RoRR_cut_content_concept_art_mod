@@ -23,6 +23,81 @@ function Util.chat(message)
     end)
 end
 
+-- ----------------------------------------------------------------------------
+-- Animacion: tinte, temblor y derrumbe progresivo
+-- ----------------------------------------------------------------------------
+Util.BLEND_NORMAL = 16777215   -- blanco: sprite sin tinte
+
+-- GameMaker usa colores BGR en un entero
+function Util.rgb(r, g, b)
+    return r + g * 256 + b * 65536
+end
+
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+-- Mezcla de dos colores {r, g, b}; t = 0 devuelve from, t = 1 devuelve to
+function Util.mix_blend(from_rgb, to_rgb, t)
+    return Util.rgb(
+        math.floor(lerp(from_rgb[1], to_rgb[1], t)),
+        math.floor(lerp(from_rgb[2], to_rgb[2], t)),
+        math.floor(lerp(from_rgb[3], to_rgb[3], t)))
+end
+
+-- Tinte que oscila suavemente entre dos colores; period en frames
+function Util.pulse_blend(frame, period, from_rgb, to_rgb)
+    local t = (math.sin(frame * 2 * math.pi / period) + 1) / 2
+    return Util.mix_blend(from_rgb, to_rgb, t)
+end
+
+function Util.spark_at(x, y)
+    if gm.constants.oEfSparks then
+        pcall(function()
+            gm.instance_create(x, y, gm.constants.oEfSparks)
+        end)
+    end
+end
+
+-- Sacude la x del altar alrededor de su posicion original
+function Util.shake(shrine, data, intensity)
+    if not data.base_x then data.base_x = shrine.x end
+    shrine.x = data.base_x + gm.random_range(-intensity, intensity)
+end
+
+function Util.shake_end(shrine, data)
+    if data.base_x then
+        shrine.x = data.base_x
+        data.base_x = nil
+    end
+end
+
+-- Un paso de derrumbe. cfg = { duration, frame_from, frame_to, max_shake, spark_interval }
+-- Recorre los fotogramas despacio, con temblor y grietas cada vez mas frecuentes.
+-- Devuelve true en el frame en que termina.
+function Util.crumble_step(shrine, data, cfg)
+    data.crumble_t = (data.crumble_t or 0) + 1
+    local progress = math.min(1, data.crumble_t / cfg.duration)
+
+    Util.shake(shrine, data, cfg.max_shake * progress)
+
+    local span = cfg.frame_to - cfg.frame_from
+    shrine.image_speed = 0
+    shrine.image_index = cfg.frame_from + math.min(span, math.floor(progress * (span + 1)))
+
+    local interval = math.max(5, math.floor(cfg.spark_interval * (1 - progress * 0.7)))
+    if data.crumble_t % interval == 0 then
+        Util.spark_at(shrine.x + gm.random_range(-14, 14), shrine.y - gm.random_range(10, 55))
+    end
+
+    if data.crumble_t >= cfg.duration then
+        Util.shake_end(shrine, data)
+        data.crumble_t = nil
+        return true
+    end
+    return false
+end
+
 -- Efectos de rotura de un altar: cristal/piedra, explosion, esquirlas y temblor
 function Util.break_effects(shrine)
     Util.play_sound(gm.constants.wGlass or gm.constants.wDrop, 1.0, 0.75, shrine.x, shrine.y)
