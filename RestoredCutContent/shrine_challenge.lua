@@ -70,6 +70,18 @@ local COST_BASE       = 35      -- oro con amenaza 0
 local COST_PER_THREAT = 0.6     -- cada punto de amenaza suma el 60% del coste base
 local COST_REFRESH    = 30      -- frames entre recalculos mientras nadie lo activa
 
+-- Tamano de oleada (enemigos): minimo comun y maximo segun el tipo de oleada
+local WAVE_MIN          = 4
+local WAVE_PER_THREAT   = 0.7    -- enemigos extra por punto de amenaza
+local WAVE_MAX_SWARM    = 8
+local WAVE_MAX_ASSAULT  = 7
+local WAVE_MAX_BRUTE    = 6
+local WAVE_MAX_PATROL   = 6
+
+-- Aparicion escalonada: un enemigo cada cierto numero de frames (aleatorio)
+local SPAWN_INTERVAL_MIN = 14
+local SPAWN_INTERVAL_MAX = 28
+
 local GRACE_FRAMES        = 60
 
 -- Anti-bloqueo: si quedan pocos enemigos y no cae ninguno, se avisa y luego se ejecutan
@@ -96,6 +108,20 @@ local POOL_NAMES = {
     [5] = { name = "Fase 5+", light = { "oChild", "oImpM" },            medium = { "oGuard", "oGolem" },    heavy = { "oGolemG", "oWispB" } },
 }
 
+-- Bestiario por mapa (clave: identificador del stage en minusculas). Si el mapa no
+-- esta aqui (stage de otro mod, por ejemplo) se usa el bestiario por fase de arriba.
+local BIOME_POOLS = {
+    driedlake         = { name = "Lago Seco",              light = { "oLizard", "oWisp" },   medium = { "oCrab", "oSpitter" },  heavy = { "oLizard" } },
+    desolateforest    = { name = "Bosque Desolado",        light = { "oBug", "oLizard" },    medium = { "oBoar", "oSpitter" },  heavy = { "oLizard" } },
+    dampcaverns       = { name = "Cavernas Humedas",       light = { "oLizard", "oJelly" },  medium = { "oClay", "oMush" },     heavy = { "oGolem" } },
+    skymeadow         = { name = "Pradera Celestial",      light = { "oWisp", "oJelly" },    medium = { "oSpitter", "oClay" },  heavy = { "oGolem" } },
+    ancientvalley     = { name = "Valle Antiguo",          light = { "oLizard", "oClay" },   medium = { "oGolem", "oBison" },   heavy = { "oWispB", "oBison" } },
+    sunkentombs       = { name = "Tumbas Hundidas",        light = { "oLizard", "oClay" },   medium = { "oGolem", "oSpitter" }, heavy = { "oWispB", "oBison" } },
+    magmabarracks     = { name = "Cuartel de Magma",       light = { "oImp", "oSpider" },    medium = { "oImpM", "oGolem" },    heavy = { "oWispB", "oBison" } },
+    hivecluster       = { name = "Colmena",                light = { "oSpider", "oBug" },    medium = { "oImpM", "oGuard" },    heavy = { "oWispB", "oGolem" } },
+    templeoftheelders = { name = "Templo de los Ancianos", light = { "oChild", "oImp" },     medium = { "oGuard", "oGolem" },   heavy = { "oGolemG", "oWispB" } },
+}
+
 local shrine_spawned_this_stage = false
 local challenge_data = {}   -- estado por id de instancia
 
@@ -118,9 +144,19 @@ local function get_data(shrine)
     return challenge_data[id]
 end
 
+-- El bestiario sale del mapa si se reconoce; la fase fija la dificultad (tier)
 local function get_pool(stage_num)
     local tier = math.min(math.max(stage_num, 1), 5)
-    local names = POOL_NAMES[tier]
+    local identifier = Util.current_stage_identifier()
+    local names = nil
+    if identifier then
+        names = BIOME_POOLS[string.lower(identifier)]
+    end
+    log.info("[RestoredCutContent] Mapa detectado: " .. tostring(identifier)
+        .. (names and " (bestiario propio)" or " (bestiario por fase)"))
+    if not names then
+        names = POOL_NAMES[tier]
+    end
     return {
         name = names.name,
         tier = tier,
@@ -221,8 +257,10 @@ end)
 -- ----------------------------------------------------------------------------
 -- Diseno de la oleada
 -- ----------------------------------------------------------------------------
-local function clamp_count(base, minimum, maximum)
-    return math.min(maximum, math.max(minimum, math.floor(base)))
+-- Tamano de oleada: entre 4 y el maximo del tipo, creciendo con la amenaza
+local function wave_size(threat, offset, maximum)
+    local size = math.floor(WAVE_MIN + threat * WAVE_PER_THREAT) + offset
+    return math.min(maximum, math.max(WAVE_MIN, size))
 end
 
 -- Devuelve titulo y lista { {obj=, is_elite=}, ... }
@@ -244,12 +282,9 @@ local function plan_wave(pool, threat)
 
     if archetype == "swarm" then
         title = "¡Un Enjambre se ha manifestado!"
-        local count, elite_chance
-        if tier == 1 then
-            count = clamp_count(3 + threat * 0.5, 3, 5)
-            elite_chance = 0.08
-        else
-            count = clamp_count(3 + threat * 0.9, 4, 8)
+        local count = wave_size(threat, 1, WAVE_MAX_SWARM)
+        local elite_chance = 0.08
+        if tier > 1 then
             elite_chance = math.min(0.30, 0.05 + threat * 0.05)
         end
         local light_count = math.floor(count * 0.8)
@@ -260,12 +295,9 @@ local function plan_wave(pool, threat)
 
     elseif archetype == "assault" then
         title = "¡Un Escuadrón de Asalto te rodea!"
-        local count, elite_chance
-        if tier == 1 then
-            count = clamp_count(2 + threat * 0.5, 3, 4)
-            elite_chance = 0.10
-        else
-            count = clamp_count(3 + threat * 0.8, 3, 6)
+        local count = wave_size(threat, 0, WAVE_MAX_ASSAULT)
+        local elite_chance = 0.10
+        if tier > 1 then
             elite_chance = math.min(0.40, 0.10 + threat * 0.07)
         end
         for i = 1, count do
@@ -275,7 +307,7 @@ local function plan_wave(pool, threat)
 
     elseif archetype == "brute" then
         title = "¡Una Guardia Pesada responde al desafío!"
-        local count = clamp_count(2 + threat * 0.5, 2, 4)
+        local count = wave_size(threat, 0, WAVE_MAX_BRUTE)
         local elite_chance = math.min(0.50, 0.20 + threat * 0.08)
         for i = 1, count do
             local list = (i == 1) and pool.heavy or pool.medium
@@ -284,10 +316,11 @@ local function plan_wave(pool, threat)
 
     else
         title = "¡Una Patrulla de Élite te acecha!"
-        local count = clamp_count(2 + threat * 0.4, 2, 3)
+        local count = wave_size(threat, 0, WAVE_MAX_PATROL)
         for i = 1, count do
             local list = (i == 1) and pool.heavy or pool.medium
-            add(Util.pick(list, fallback), true)
+            -- Los dos primeros siempre son elite; el resto, con buena probabilidad
+            add(Util.pick(list, fallback), i <= 2 or gm.random(1.0) < 0.35)
         end
     end
 
@@ -309,60 +342,85 @@ local function choose_elite(allow_blighted, blighted_used)
     return safe[gm.irandom_range(1, #safe)], false
 end
 
-local function spawn_wave(shrine, data)
+-- Prepara la oleada: decide la composicion y la deja en una cola. Los enemigos no
+-- aparecen de golpe: process_spawn_queue saca uno cada pocos frames.
+local function start_wave(data)
     local stage_num, threat = read_difficulty()
     local pool = get_pool(stage_num)
     local title, plan = plan_wave(pool, threat)
 
-    local allow_blighted = threat >= BLIGHTED_MIN_THREAT and stage_num >= BLIGHTED_MIN_STAGE
-    local blighted_used = false
-
     Util.chat("<y>[Altar de Desafío]</c> " .. title .. " (" .. #plan .. " enemigos | " .. pool.name .. ")")
 
+    data.queue = plan
+    data.queue_index = 0
+    data.spawn_cooldown = 0
+    data.allow_blighted = threat >= BLIGHTED_MIN_THREAT and stage_num >= BLIGHTED_MIN_STAGE
+    data.blighted_used = false
+
     data.mobs = {}
+    data.alive_count = #plan       -- cuenta los que aun no han aparecido
+    data.initial_count = #plan
+    data.threat = threat
+    data.stage_num = stage_num
+    log.info(string.format("[RestoredCutContent] Horda: %d enemigos (%s, amenaza %.2f)", #plan, pool.name, threat))
+end
+
+-- Coloca un enemigo del plan junto al altar con un destello de aparicion
+local function spawn_one(shrine, data, entry, index)
     local ground_y = shrine.y
+    local side = (index % 2 == 0) and 1 or -1
+    local distance = math.min(110, 54 + math.floor((index - 1) / 2) * 16)
+    local x = shrine.x + side * distance
+    local mob
 
-    for i, entry in ipairs(plan) do
-        local side = (i % 2 == 0) and 1 or -1
-        local distance = math.min(100, 54 + math.floor((i - 1) / 2) * 16)
-        local x = shrine.x + side * distance
-        local mob
-
-        if is_flying(entry.obj) then
-            mob = gm.instance_create(x, ground_y - 75 - i * 8, entry.obj)
-        else
-            mob = gm.instance_create(x, ground_y, entry.obj)
-            if mob and Instance.exists(mob) then
-                -- Empujar hacia el altar si ha nacido dentro de una pared
-                local pushed = 0
-                while pushed < 40 and Util.is_true(mob:place_meeting(mob.x, mob.y, gm.constants.oB)) do
-                    mob.x = mob.x - side * 2
-                    pushed = pushed + 2
-                end
-                Util.snap_to_ground(mob, 80, 40)
-            end
-        end
-
+    if is_flying(entry.obj) then
+        mob = gm.instance_create(x, ground_y - 75 - (index % 4) * 8, entry.obj)
+    else
+        mob = gm.instance_create(x, ground_y, entry.obj)
         if mob and Instance.exists(mob) then
-            if entry.is_elite then
-                local elite_id, is_blighted = choose_elite(allow_blighted, blighted_used)
-                if is_blighted then
-                    blighted_used = true
-                    Util.chat("<r>[Altar de Desafío]</c> ¡Una Aberración Umbría (élite Sombra) acecha en el desafío!")
-                end
-                pcall(function()
-                    gm.elite_set(mob, elite_id)
-                end)
+            -- Empujar hacia el altar si ha nacido dentro de una pared
+            local pushed = 0
+            while pushed < 40 and Util.is_true(mob:place_meeting(mob.x, mob.y, gm.constants.oB)) do
+                mob.x = mob.x - side * 2
+                pushed = pushed + 2
             end
-            table.insert(data.mobs, mob)
+            Util.snap_to_ground(mob, 80, 40)
         end
     end
 
-    data.alive_count = #data.mobs
-    data.initial_count = #data.mobs
-    data.threat = threat
-    data.stage_num = stage_num
-    log.info(string.format("[RestoredCutContent] Horda: %d enemigos (%s, amenaza %.2f)", #data.mobs, pool.name, threat))
+    if not mob or not Instance.exists(mob) then return end
+
+    if entry.is_elite then
+        local elite_id, is_blighted = choose_elite(data.allow_blighted, data.blighted_used)
+        if is_blighted then
+            data.blighted_used = true
+            Util.chat("<r>[Altar de Desafío]</c> ¡Una Aberración Umbría (élite Sombra) acecha en el desafío!")
+        end
+        pcall(function()
+            gm.elite_set(mob, elite_id)
+        end)
+    end
+
+    -- Destello de aparicion con chispas (oEfSpawnFlash falla en su Draw si se crea
+    -- desde Lua y deja la pantalla en blanco: no usarlo)
+    for _ = 1, 3 do
+        Util.spark_at(mob.x + gm.random_range(-8, 8), mob.y - gm.random_range(4, 28))
+    end
+
+    table.insert(data.mobs, mob)
+end
+
+-- Saca el siguiente enemigo de la cola cuando toca (intervalo aleatorio)
+local function process_spawn_queue(shrine, data)
+    if not data.queue or #data.queue == 0 then return end
+
+    data.spawn_cooldown = data.spawn_cooldown - 1
+    if data.spawn_cooldown > 0 then return end
+
+    local entry = table.remove(data.queue, 1)
+    data.queue_index = data.queue_index + 1
+    data.spawn_cooldown = gm.irandom_range(SPAWN_INTERVAL_MIN, SPAWN_INTERVAL_MAX)
+    spawn_one(shrine, data, entry, data.queue_index)
 end
 
 -- ----------------------------------------------------------------------------
@@ -425,7 +483,7 @@ local function begin_beam(shrine, data)
     for _ = 1, 6 do
         Util.spark_at(shrine.x + gm.random_range(-14, 14), shrine.y - gm.random_range(10, 90))
     end
-    spawn_wave(shrine, data)
+    start_wave(data)
 end
 
 -- Carga: cada fotograma dura menos que el anterior (se acelera), el tinte vira a azul,
@@ -472,6 +530,7 @@ end
 local function update_beam(shrine, data)
     data.timer = data.timer + 1
     shrine.image_speed = 0
+    process_spawn_queue(shrine, data)   -- los enemigos ya empiezan a aparecer con el rayo
 
     local total = beam_total()
     local kick = 1 - Util.ease_out(Util.clamp01(data.timer / total))   -- 1 -> 0
@@ -546,7 +605,9 @@ local function track_enemies(shrine, data)
     end
     data.mobs = alive_mobs
 
-    local alive = #alive_mobs
+    -- Los que aun no han aparecido cuentan como vivos: sin victoria hasta que salgan todos
+    local pending = #(data.queue or {})
+    local alive = #alive_mobs + pending
     data.stall_timer = (data.stall_timer or 0) + 1
 
     if alive ~= data.alive_count then
@@ -569,7 +630,7 @@ local function track_enemies(shrine, data)
     end
 
     -- Con pocos enemigos vivos: chispas sobre cada uno para que se puedan localizar
-    if alive > 0 and alive <= BEACON_MAX_ENEMIES then
+    if pending == 0 and alive > 0 and alive <= BEACON_MAX_ENEMIES then
         if data.stall_timer % BEACON_INTERVAL == 0 then
             for _, mob in ipairs(alive_mobs) do
                 Util.spark_at(mob.x, mob.y - 24)
@@ -585,7 +646,8 @@ local function track_enemies(shrine, data)
     end
 
     -- Estancado: sin bajas durante mucho tiempo y quedan pocos -> ejecutar rezagados
-    if alive > 0 and alive <= BEACON_MAX_ENEMIES and data.stall_timer >= STALL_EXECUTE_FRAMES then
+    if pending == 0 and alive > 0 and alive <= BEACON_MAX_ENEMIES
+        and data.stall_timer >= STALL_EXECUTE_FRAMES then
         execute_stragglers(shrine, data)
         victory(shrine, data)
     end
@@ -595,6 +657,7 @@ end
 -- al quedar pocos enemigos late mas rapido, mas brillante y suelta mas chispas.
 local function update_combat(shrine, data)
     data.timer = data.timer + 1
+    process_spawn_queue(shrine, data)
 
     local intensity = 0
     if data.initial_count > 0 then

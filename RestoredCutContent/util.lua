@@ -268,6 +268,33 @@ function Util.read_difficulty()
     return stage_num, threat
 end
 
+-- Identificador del mapa actual (por ejemplo "driedLake", "magmaBarracks") o nil.
+-- Se busca el stage cuyo room_list contiene la sala en la que estamos.
+local cached_stage = { room = nil, identifier = nil }
+
+function Util.current_stage_identifier()
+    local room = gm.variable_global_get("room")
+    if cached_stage.room == room and cached_stage.identifier then
+        return cached_stage.identifier
+    end
+
+    local found = nil
+    pcall(function()
+        for _, stage in ipairs(Stage.find_all()) do
+            for _, stage_room in ipairs(List.wrap(stage.room_list)) do
+                if stage_room == room then
+                    found = stage.identifier
+                    return
+                end
+            end
+        end
+    end)
+
+    cached_stage.room = room
+    cached_stage.identifier = found
+    return found
+end
+
 -- Coste en oro que crece con la amenaza: base * (1 + amenaza * por_amenaza)
 function Util.gold_cost(base, per_threat)
     local _, threat = Util.read_difficulty()
