@@ -1,7 +1,10 @@
 -- ============================================================================
 -- shrine_empower.lua
--- Restaura oShrineEmpower (sprite sShrineEmpower): altar gratuito de un solo uso
--- que concede la bendicion "blessing_empower" y despues se quiebra.
+-- Restaura oShrineEmpower (sprite sShrineEmpower): altar de un solo uso que pide
+-- oro Y vida a la vez a cambio de la bendicion "blessing_empower"; despues se quiebra.
+--
+-- Fotogramas de sShrineEmpower (por geometria): 0 reposo, 1 despertar,
+-- 2-4 halo creciente, 5-6 estatua agrietada/rota.
 -- ============================================================================
 
 local loaded = require("util.lua")
@@ -9,6 +12,12 @@ local Util = (type(loaded) == "table") and loaded or RCC_UTIL
 
 local SHRINE_OBJ    = gm.constants.oShrineEmpower or 625
 local SHRINE_SPRITE = gm.constants.sShrineEmpower
+
+-- Precio: ambos se pagan a la vez
+local COST_BASE       = 25     -- oro con amenaza 0 (escala con la amenaza)
+local COST_PER_THREAT = 0.5
+local COST_REFRESH    = 30     -- frames entre recalculos mientras nadie lo activa
+local LIFE_FRACTION   = 0.30   -- parte de la vida maxima que se ofrece (nunca letal)
 
 local BUFF_SECONDS   = 45
 local GLOW_FRAMES    = 180   -- 3 s de resplandor antes de quebrarse
@@ -18,7 +27,8 @@ local AURA_INTERVAL  = 15
 local STATE_IDLE, STATE_GLOWING, STATE_BREAKING, STATE_SPENT = "idle", "glowing", "breaking", "spent"
 
 local shrine_spawned_this_stage = false
-local shrine_data = {}   -- estado por id de instancia
+local used_this_stage = false   -- la bendicion solo puede tomarse una vez por fase
+local shrine_data = {}        -- estado por id de instancia
 local frame_counter = 0
 
 -- ----------------------------------------------------------------------------
@@ -76,21 +86,43 @@ local function get_data(shrine)
     return shrine_data[id]
 end
 
--- Frames del sprite: [0] reposo, [1..mid) halo pulsante, [mid..last] rotura
+-- Reparto de fotogramas segun el numero real de frames del sprite
+-- (7: 0 reposo, 1 despertar, 2-4 halo, 5-6 rotura)
 local function frame_layout(shrine)
     local count = 7
     pcall(function()
         count = math.floor(gm.sprite_get_number(shrine.sprite_index))
     end)
-    local last = math.max(2, count - 1)
-    return { glow_from = 1, break_from = math.floor(last / 2), last = last }
+    local last = math.max(3, count - 1)
+    local halo_to = math.max(2, last - 2)
+    return {
+        rise = 1,
+        halo_from = 2,
+        halo_to = halo_to,
+        crumble_from = halo_to,
+        crumble_to = math.max(halo_to, last - 1),
+        last = last,
+    }
+end
+
+-- Oro que cuesta ahora y vida que se descontara al activarlo
+local function current_gold_cost()
+    return Util.gold_cost(COST_BASE, COST_PER_THREAT)
+end
+
+local function life_cost_for(player)
+    local max_hp = player.maxhp
+    local hp = player.hp
+    if type(max_hp) ~= "number" or type(hp) ~= "number" then return 0 end
+    -- Nunca mata: como minimo queda 1 de vida
+    return math.max(0, math.min(math.floor(max_hp * LIFE_FRACTION), math.floor(hp) - 1))
 end
 
 local function configure_shrine(shrine)
     shrine.active      = 0
     shrine.use_max     = 1
-    shrine.cost        = 0
-    shrine.cost_type   = 0
+    shrine.cost        = current_gold_cost()
+    shrine.cost_type   = 0   -- oro (la vida se descuenta al activarlo)
     shrine.visible     = true
     shrine.image_index = 0
     shrine.image_speed = 0
@@ -98,10 +130,6 @@ local function configure_shrine(shrine)
     if SHRINE_SPRITE then
         shrine.sprite_index = SHRINE_SPRITE
     end
-
-    pcall(function()
-        gm.interactable_init_cost(shrine.id, 0, 0)
-    end)
 
     Util.snap_to_ground(shrine, 80, 40)
     get_data(shrine)
@@ -130,7 +158,8 @@ Callback.add(Callback.TYPE.postStep, "EmpowerShrine_DebugSpawn", function()
 
     local ok, result = pcall(spawn_shrine_at, player.x + 60, player.y)
     if ok and result then
-        Util.chat("<g>[DEBUG F5]</c> Altar de Empoderamiento creado. Pulsa E para probarlo.")
+        get_data(result).debug = true   -- las pruebas no gastan el uso de la fase
+        Util.chat("<g>[DEBUG F5]</c> Altar de Empoderamiento creado: $" .. tostring(result.cost) .. " + " .. math.floor(LIFE_FRACTION * 100) .. "% de vida. F8 da oro; pulsa E para probarlo.")
     else
         log.error("[RestoredCutContent] F5 fallo: " .. tostring(result))
     end
@@ -139,8 +168,10 @@ end)
 -- ----------------------------------------------------------------------------
 -- Generacion por fase
 -- ----------------------------------------------------------------------------
+-- Cada fase empieza con la bendicion disponible de nuevo
 Callback.add(Callback.TYPE.onStageStart, "EmpowerShrine_ResetStage", function()
     shrine_spawned_this_stage = false
+    used_this_stage = false
     shrine_data = {}
 end)
 
@@ -179,22 +210,40 @@ local function find_activator(shrine)
     return activator or Util.nearest_player(shrine.x, shrine.y)
 end
 
+-- Altar ya gastado (o vetado por haberse usado en la fase): ruina inerte
+local function make_inert(shrine, data)
+    data.state = STATE_SPENT
+    shrine.active = 3
+    shrine.image_speed = 0
+    shrine.image_index = frame_layout(shrine).last
+    shrine.image_blend = Util.rgb(COLOR_RUIN[1], COLOR_RUIN[2], COLOR_RUIN[3])
+end
+
 local function start_blessing(shrine, data)
     data.state = STATE_GLOWING
     data.glow_timer = 0
     shrine.active = 2   -- bloquea nuevas interacciones
+    if not data.debug then
+        used_this_stage = true
+    end
 
     local player = find_activator(shrine)
     if player and player:exists() then
+        -- El oro ya lo cobro el motor; aqui se ofrece la vida
+        local life = life_cost_for(player)
+        if life > 0 then
+            player.hp = player.hp - life
+        end
+
         player:buff_apply(buff_empower, BUFF_SECONDS * 60)
         Util.play_sound(gm.constants.wLevelUp, 1.0, 1.1, shrine.x, shrine.y)
         if gm.constants.oEfCircle then
             gm.instance_create(shrine.x, shrine.y - 48, gm.constants.oEfCircle)
         end
-        Util.chat("<y>[Altar de Empoderamiento]</c> ¡Bendición Sagrada! (+35% daño, +30% vel. ataque, +20% crítico, +25% movimiento durante 45 s)")
+        Util.chat("<y>[Altar de Empoderamiento]</c> Ofreciste oro y " .. life .. " de vida. ¡Bendición Sagrada! (+35% daño, +30% vel. ataque, +20% crítico, +25% movimiento durante 45 s)")
     end
 
-    shrine.image_index = frame_layout(shrine).glow_from
+    shrine.image_index = frame_layout(shrine).rise
     shrine.image_speed = 0
 end
 
@@ -205,10 +254,17 @@ local function update_glowing(shrine, data, layout)
 
     local t = data.glow_timer
     local progress = math.min(1, t / GLOW_FRAMES)
-    local halo_frames = math.max(1, layout.break_from - layout.glow_from)
 
+    -- Despertar (1) y despues el halo 2..4 yendo y viniendo (2,3,4,3,2...)
     shrine.image_speed = 0
-    shrine.image_index = layout.glow_from + (math.floor(t / GLOW_HOLD) % halo_frames)
+    if t < GLOW_HOLD then
+        shrine.image_index = layout.rise
+    else
+        local span = layout.halo_to - layout.halo_from
+        local step = math.floor((t - GLOW_HOLD) / GLOW_HOLD) % (span * 2)
+        if step > span then step = span * 2 - step end
+        shrine.image_index = layout.halo_from + step
+    end
 
     local pulse = (math.sin(t * 2 * math.pi / GLOW_PULSE) + 1) / 2
     shrine.image_blend = Util.mix_blend(COLOR_WHITE, COLOR_GOLD, progress * (0.55 + 0.45 * pulse))
@@ -234,8 +290,8 @@ local function update_breaking(shrine, data, layout)
 
     local finished = Util.crumble_step(shrine, data, {
         duration = CRUMBLE_FRAMES,
-        frame_from = layout.break_from,
-        frame_to = math.max(layout.break_from, layout.last - 1),
+        frame_from = layout.crumble_from,
+        frame_to = layout.crumble_to,
         max_shake = CRUMBLE_SHAKE,
         spark_interval = CRUMBLE_SPARKS,
     })
@@ -253,7 +309,19 @@ local function update_shrine(shrine)
     local data = get_data(shrine)
     local layout = frame_layout(shrine)
 
+    if data.state == STATE_IDLE and used_this_stage and not data.debug then
+        make_inert(shrine, data)
+        return
+    end
+
     if data.state == STATE_IDLE then
+        -- El precio sube con el avance del mapa hasta que alguien lo paga
+        data.cost_timer = (data.cost_timer or 0) + 1
+        if data.cost_timer >= COST_REFRESH then
+            data.cost_timer = 0
+            shrine.cost = current_gold_cost()
+        end
+
         if shrine.active == 1 or shrine.active == 2 then
             start_blessing(shrine, data)
         end

@@ -19,7 +19,8 @@ local SHRINE_SPRITE = gm.constants.sShrine6
 -- sin tocar la logica. Los tiempos son frames (60 = 1 segundo).
 local FRAME_CHARGE_LAST = 6     -- la carga recorre 0..6 de uno en uno
 local FRAME_BEAM        = 7     -- rayo vertical: solo al invocar
-local FRAME_COMBAT      = 6     -- fotograma fijo con chispas azules durante el combate
+local FRAME_COMBAT_A    = 4     -- chispas sobre la estatua (103 px de alto, igual que el 5)
+local FRAME_COMBAT_B    = 5
 local FRAME_FADE_FROM   = 8     -- disipacion 8..9
 local FRAME_FADE_LAST   = 9
 local FRAME_DEAD        = 10    -- estatua apagada
@@ -27,6 +28,7 @@ local FRAME_DEAD        = 10    -- estatua apagada
 local CHARGE_HOLD     = 14      -- frames que se mantiene cada fotograma de carga
 local BEAM_HOLD       = 30      -- duracion del rayo
 local FADE_HOLD       = 24      -- frames por fotograma de disipacion
+local COMBAT_FLIP     = 10      -- frames entre 4 y 5 durante el combate
 local CRUMBLE_FRAMES  = 150     -- derrumbe final (2,5 s)
 local CRUMBLE_SHAKE   = 2.5     -- temblor maximo en px
 local CRUMBLE_SPARKS  = 22      -- intervalo inicial entre grietas
@@ -114,29 +116,10 @@ end
 -- ----------------------------------------------------------------------------
 -- Amenaza y coste
 -- ----------------------------------------------------------------------------
-local function read_difficulty()
-    local stages_passed, enemy_buff = 0, 1.0
-    local director = gm._mod_game_getDirector()
-    if not director or not Instance.exists(director) then
-        director = Instance.find(gm.constants.oDirectorControl)
-    end
-    if director and Instance.exists(director) then
-        if type(director.stages_passed) == "number" then
-            stages_passed = math.floor(director.stages_passed)
-        end
-        if type(director.enemy_buff) == "number" then
-            enemy_buff = math.max(1.0, director.enemy_buff)
-        end
-    end
-    local stage_num = stages_passed + 1
-    local threat = (enemy_buff * 0.75) + (stages_passed * 1.1)
-    return stage_num, threat
-end
+local read_difficulty = Util.read_difficulty
 
--- Coste en oro: crece con la amenaza (fases superadas + tiempo de partida)
 local function current_cost()
-    local _, threat = read_difficulty()
-    return math.floor(COST_BASE * (1 + threat * COST_PER_THREAT))
+    return Util.gold_cost(COST_BASE, COST_PER_THREAT)
 end
 
 -- ----------------------------------------------------------------------------
@@ -473,7 +456,12 @@ end
 local function update_combat(shrine, data)
     data.timer = data.timer + 1
 
-    shrine.image_index = FRAME_COMBAT
+    -- 4 y 5 miden lo mismo: alternan sin saltos de altura
+    if math.floor(data.timer / COMBAT_FLIP) % 2 == 0 then
+        shrine.image_index = FRAME_COMBAT_A
+    else
+        shrine.image_index = FRAME_COMBAT_B
+    end
     shrine.image_speed = 0
     shrine.image_blend = Util.pulse_blend(data.timer, PULSE_PERIOD, BLEND_COMBAT_A, BLEND_COMBAT_B)
 
@@ -512,7 +500,7 @@ local function update_crumbling(shrine, data)
 
     local finished = Util.crumble_step(shrine, data, {
         duration = CRUMBLE_FRAMES,
-        frame_from = FRAME_FADE_LAST,
+        frame_from = FRAME_DEAD,   -- la estatua (10) tiembla; no hay otro fotograma de rotura
         frame_to = FRAME_DEAD,
         max_shake = CRUMBLE_SHAKE,
         spark_interval = CRUMBLE_SPARKS,

@@ -115,6 +115,32 @@ function Util.break_effects(shrine)
     end)
 end
 
+-- Fase actual y nivel de amenaza (fases superadas + tiempo de partida)
+function Util.read_difficulty()
+    local stages_passed, enemy_buff = 0, 1.0
+    local director = gm._mod_game_getDirector()
+    if not director or not Instance.exists(director) then
+        director = Instance.find(gm.constants.oDirectorControl)
+    end
+    if director and Instance.exists(director) then
+        if type(director.stages_passed) == "number" then
+            stages_passed = math.floor(director.stages_passed)
+        end
+        if type(director.enemy_buff) == "number" then
+            enemy_buff = math.max(1.0, director.enemy_buff)
+        end
+    end
+    local stage_num = stages_passed + 1
+    local threat = (enemy_buff * 0.75) + (stages_passed * 1.1)
+    return stage_num, threat
+end
+
+-- Coste en oro que crece con la amenaza: base * (1 + amenaza * por_amenaza)
+function Util.gold_cost(base, per_threat)
+    local _, threat = Util.read_difficulty()
+    return math.floor(base * (1 + threat * per_threat))
+end
+
 -- Devuelve la lista de constantes de GameMaker que existen realmente.
 -- Evita los huecos nil que cortan los ipairs en las tablas de enemigos.
 function Util.resolve_constants(names)
