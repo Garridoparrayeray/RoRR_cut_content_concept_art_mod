@@ -23,6 +23,7 @@ local watched = nil             -- instancia observada
 local watch_timer = 0
 local last_sprite = nil
 local last_player_hp = nil
+local last_hp = nil
 
 -- Lee un campo sin que un campo inexistente rompa la observacion
 local function read_field(inst, field)
@@ -75,6 +76,7 @@ local function spawn_tardigrade(player)
     watch_timer = 0
     last_sprite = nil
     last_player_hp = nil
+    last_hp = nil
 
     log.info("[RestoredCutContent] Tardigrado creado" .. (variant and " (ALFA)" or "") .. ": " .. describe(inst))
     if variant then
@@ -107,6 +109,15 @@ local function update_monitor()
         log.info(string.format("[RestoredCutContent] Tardigrado t=%d: animacion %s -> %s (distancia al jugador %.0f px)",
             watch_timer, tostring(last_sprite), sprite, distance))
         last_sprite = sprite
+    end
+
+    -- Dano que recibe el Tardigrado: cada impacto por separado, para comparar habilidades
+    if type(watched.hp) == "number" then
+        if last_hp and watched.hp < last_hp then
+            log.info(string.format("[RestoredCutContent] Tardigrado t=%d: recibe %.0f de dano (%.0f -> %.0f de %s)",
+                watch_timer, last_hp - watched.hp, last_hp, watched.hp, read_field(watched, "maxhp")))
+        end
+        last_hp = watched.hp
     end
 
     -- Dano al jugador: atribuido a la animacion en curso

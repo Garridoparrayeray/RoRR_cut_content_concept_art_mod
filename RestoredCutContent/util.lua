@@ -310,9 +310,11 @@ end
 -- Las variantes (por ejemplo "boss") sustituyen a los valores base.
 Util.ENEMY_TUNING = {
     oMacT = {
-        hp = 0.7, reward = 1.8,   -- mucha vida y golpea fuerte; si explota solo no da nada
+        -- Medido en partida: vida 100 (= Lemurian) y recompensa 20 (Lemurian 6, Wisp 12, Spitter 23).
+        -- Ya paga bien por si mismo: sin ajuste. Si explota solo no da nada.
+        hp = 1.0, reward = 1.0,
         variants = {
-            boss = { hp = 3.0, reward = 4.5, scale = 1.35 },   -- Tardigrado Alfa
+            boss = { hp = 3.0, reward = 2.5, scale = 1.35 },   -- Tardigrado Alfa (~300 de vida, ~50 de recompensa)
         },
     },
 }
