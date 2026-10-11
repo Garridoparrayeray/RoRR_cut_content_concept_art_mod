@@ -1,0 +1,14 @@
+# Registros y temporales
+*.log
+LogOutput.log
+
+# Material de terceros (concept art y GIF del documento original, volcados del juego)
+assets/
+*.docx
+*.odt
+*.qoi
+blob_*.bin
+
+# Sistema
+Thumbs.db
+.DS_Store
