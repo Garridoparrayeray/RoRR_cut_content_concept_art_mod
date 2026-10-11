@@ -87,6 +87,15 @@ Dee
 (Additional programming, animation, and design)  
 Thanks for doing this job accessible.  
 
+## Licencia
+
+El código y la documentación de este repositorio están bajo la **licencia MIT** (ver [`LICENSE`](LICENSE)): puedes
+usarlos, copiarlos, modificarlos y redistribuirlos libremente, manteniendo el aviso de copyright.
+
+**La licencia MIT no cubre los recursos de terceros** de `RestoredCutContent/assets/` (concept art, sprites y
+animaciones de *Risk of Rain Returns*), que pertenecen a sus autores originales. Se incluyen por ser contenido que el
+equipo de desarrollo publicó, y se rigen por sus propios derechos.
+
 ## Aviso
 
 - Contenido original: **Hopoo Games / Gearbox** — *Risk of Rain Returns*.
