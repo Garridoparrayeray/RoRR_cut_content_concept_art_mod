@@ -1,74 +1,77 @@
 # RoRR_cut_content_concept_art_mod
+
+[Español](README.es.md) · **English**
+
 In this repo u will see implementations of the cut content of Risk of Rain Returns and implementation of some. concept arts. 
 
-## Restored Cut Content — mod para Risk of Rain Returns
+## Restored Cut Content — a mod for Risk of Rain Returns
 
-Mod de [ReturnOfModding](https://thunderstore.io/c/risk-of-rain-returns/) que **restaura contenido recortado o
-inacabado** de *Risk of Rain Returns* a partir de lo que los desarrolladores dejaron en los archivos del juego y
-del documento público de contenido descartado y concept art.
+A [ReturnOfModding](https://thunderstore.io/c/risk-of-rain-returns/) mod that **restores cut or unfinished
+content** from *Risk of Rain Returns*, based on what the developers left in the game files and on the public
+cut content and concept art document.
 
-> Estado: **en desarrollo (0.1.0)**. Varias partes se ajustan con mediciones hechas en partida.
+> Status: **work in progress (0.1.0)**. Several values are tuned from measurements taken in-game.
 
-## Qué incluye
+## What it includes
 
-### Altar de Desafío (`oShrine6`)
-Altar recortado, de un solo uso, que cuesta oro y encarece con la amenaza (fases superadas + tiempo).
+### Challenge Shrine (`oShrine6`)
+A cut, single-use shrine that costs gold and gets more expensive with threat (stages cleared + time).
 
-- Carga, rayo completo, combate con latido azul que responde a la horda, sobrecarga y **destrucción con su
-  animación nativa** (`sShrine6Death`), dejando escombros y soltando un objeto.
-- Hordas de **4 a 8 enemigos** que aparecen **uno a uno**; tamaño, élites y recompensa escalan con la amenaza.
-- El bestiario depende del **mapa** (Lago Seco, Bosque Desolado, Cavernas Húmedas, Pradera Celestial, Valle
-  Antiguo, Tumbas Hundidas, Cuartel de Magma, Colmena, Templo de los Ancianos).
-- Puede haber 0–3 por mapa; cada uno se paga por separado.
+- Charge-up, a full lightning strike, a combat phase with a blue pulse that reacts to the horde, an overload and a
+  **destruction using its native animation** (`sShrine6Death`) that leaves rubble and drops an item.
+- Hordes of **4 to 8 enemies** that spawn **one by one**; size, elites and reward scale with threat.
+- The bestiary depends on the **map** (Dried Lake, Desolate Forest, Damp Caverns, Sky Meadow, Ancient Valley,
+  Sunken Tombs, Magma Barracks, Hive Cluster, Temple of the Elders).
+- There can be 0–3 per map; each one is paid for separately.
 
-### Altar de Empoderamiento (`oShrineEmpower`)
-Altar recortado que pide **oro y vida a la vez** (nunca letal) a cambio de una bendición temporal (daño,
-velocidad de ataque, crítico y movimiento, más un golpe sagrado). **Solo uno por fase.** Se destruye con su
-animación nativa (`sShrineEmpowerDeath`).
+### Empowerment Shrine (`oShrineEmpower`)
+A cut shrine that asks for **gold and health at the same time** (never lethal) in exchange for a temporary blessing
+(damage, attack speed, crit and movement, plus a holy strike). **Only one per stage.** It is destroyed with its
+native animation (`sShrineEmpowerDeath`).
 
 ### Macrobic Tardigrade (`oMacT`)
-Enemigo descartado que sigue en los archivos del juego.
+A cut enemy that is still in the game files.
 
-- Camina hacia el jugador, golpea cuerpo a cuerpo y explota; el mod completa esa explosión para que dañe y lo
-  mate (el original la animaba pero seguía andando).
-- Aparece como rareza en hordas y de forma natural junto a paredes.
-- Con amenaza alta puede aparecer como **Alfa** (jefe): más vida, más grande y mejor recompensa.
+- It walks towards the player, hits in melee and explodes; the mod finishes that explosion so it deals damage and
+  kills the enemy (the original animated it but the enemy kept walking).
+- It appears as a rarity in hordes and naturally next to walls.
+- At high threat it can show up as an **Alpha** (boss): more health, bigger and a better reward.
 
-## Instalación
+## Installation
 
-Copia la carpeta `RestoredCutContent` en `ReturnOfModding/plugins/` (o instálalo con r2modman en un perfil que
-tenga las dependencias de `manifest.json`). El mod funciona directamente: **no incluye modo dios ni teclas de
-trampa**.
+Copy the `RestoredCutContent` folder into `ReturnOfModding/plugins/` (or install it with r2modman in a profile that
+has the dependencies listed in `manifest.json`). The mod works out of the box: **it ships with no god mode and no
+cheat keys**.
 
-Dependencias: ReturnOfModding, ReturnsAPI y RoRR Modding Toolkit.
+Dependencies: ReturnOfModding, ReturnsAPI and RoRR Modding Toolkit.
 
-## Herramientas de desarrollo (aparte del mod)
+## Development tools (separate from the mod)
 
-Las teclas de prueba y las trampas **no forman parte del mod**: están en [`dev_tools/`](dev_tools/) para el equipo.
-Se activan copiando `dev_tools/debug_tools.lua` junto a `main.lua`; sin ese fichero, el mod no carga nada de eso.
-Ver [`dev_tools/README.md`](dev_tools/README.md).
+Test keys and cheats are **not part of the mod**: they live in [`dev_tools/`](dev_tools/) for the team. They are
+enabled by copying `dev_tools/debug_tools.lua` next to `main.lua`; without that file the mod loads none of it.
+See [`dev_tools/README.md`](dev_tools/README.md).
 
-## Estructura
+## Structure
 
-| Ruta | Contenido |
+| Path | Contents |
 |---|---|
-| `RestoredCutContent/` | El mod (lo único que se instala) |
-| `RestoredCutContent/main.lua` | Punto de entrada y orden de carga |
-| `RestoredCutContent/util.lua` | Utilidades compartidas: animación, generación de altares, ajuste de enemigos, bioma |
-| `RestoredCutContent/shrine_challenge.lua` | Altar de Desafío |
-| `RestoredCutContent/shrine_empower.lua` | Altar de Empoderamiento |
-| `RestoredCutContent/tardigrade.lua` | Tardígrado: explosión y aparición natural |
-| `RestoredCutContent/assets/` | Sprites y animaciones del contenido recortado (Mono, Roble Inquieto, drones, items, Chef...), tomados del documento de contenido descartado y organizados por tipo |
-| `dev_tools/` | Herramientas de prueba y de extracción de datos (no se instalan) |
-| `docs/mediciones.md` | Datos medidos en partida |
-| `CHANGELOG.md` | Versiones, en orden |
+| `RestoredCutContent/` | The mod (the only thing you install) |
+| `RestoredCutContent/main.lua` | Entry point and module load order |
+| `RestoredCutContent/util.lua` | Shared utilities: animation, shrine spawning, enemy tuning, biome detection |
+| `RestoredCutContent/shrine_challenge.lua` | Challenge Shrine |
+| `RestoredCutContent/shrine_empower.lua` | Empowerment Shrine |
+| `RestoredCutContent/tardigrade.lua` | Tardigrade: explosion and natural spawning |
+| `RestoredCutContent/assets/` | Sprites and animations of the cut content (Monkey, Restless Oak, drones, items, Chef...), taken from the cut content document and sorted by type |
+| `dev_tools/` | Test and data-extraction tools (not installed) |
+| `docs/mediciones.md` | Measurements taken in-game (in Spanish) |
+| `CHANGELOG.md` | Versions, in order (in Spanish) |
 
-## Cómo se trabaja
+## How it is developed
 
-El código del juego va compilado (no hay GML legible), así que el comportamiento de los objetos descartados se
-**mide en partida**: el mod escribe en `LogOutput.log` animaciones, daños, vida y recompensa de cada enemigo, y los
-valores se ajustan con esos datos. Los ajustes viven en constantes al inicio de cada fichero o en
-`Util.ENEMY_TUNING`. El historial de git conserva cada versión, con la `build` que llevaba.
+The game's code is compiled (there is no readable GML), so the behaviour of cut objects is **measured in-game**:
+the mod writes animations, damage, health and rewards of each enemy to `LogOutput.log`, and values are tuned from
+that data. Settings live in constants at the top of each file or in `Util.ENEMY_TUNING`. The git history keeps
+every version, together with the `build` it carried.
 
 ## Credits
 potato: Doc creator and maintainer (Discord: garlicism)  
@@ -87,16 +90,16 @@ Dee
 (Additional programming, animation, and design)  
 Thanks for doing this job accessible.  
 
-## Licencia
+## License
 
-El código y la documentación de este repositorio están bajo la **licencia MIT** (ver [`LICENSE`](LICENSE)): puedes
-usarlos, copiarlos, modificarlos y redistribuirlos libremente, manteniendo el aviso de copyright.
+The code and documentation in this repository are released under the **MIT license** (see [`LICENSE`](LICENSE)):
+you are free to use, copy, modify and redistribute them, keeping the copyright notice.
 
-**La licencia MIT no cubre los recursos de terceros** de `RestoredCutContent/assets/` (concept art, sprites y
-animaciones de *Risk of Rain Returns*), que pertenecen a sus autores originales. Se incluyen por ser contenido que el
-equipo de desarrollo publicó, y se rigen por sus propios derechos.
+**The MIT license does not cover the third-party resources** in `RestoredCutContent/assets/` (concept art, sprites
+and animations from *Risk of Rain Returns*), which belong to their original authors. They are included because they
+are content the development team made public, and they remain subject to their own rights.
 
-## Aviso
+## Notice
 
-- Contenido original: **Hopoo Games / Gearbox** — *Risk of Rain Returns*.
-- Proyecto de aficionados, sin afiliación con los desarrolladores.
+- Original content: **Hopoo Games / Gearbox** — *Risk of Rain Returns*.
+- Fan project, not affiliated with the developers.
