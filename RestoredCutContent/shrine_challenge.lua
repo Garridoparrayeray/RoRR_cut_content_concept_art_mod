@@ -100,8 +100,9 @@ local SND_WIN    = gm.constants.wLevelUp
 local FLYING_NAMES = { "oWisp", "oWispB", "oJelly" }
 
 -- Macrobic Tardigrade (oMacT): enemigo descartado que sigue en los archivos del juego.
--- Es un kamikaze: tras una pausa de carga pasa a su animacion de muerte, corre hacia el
--- jugador y explota si no se le mata antes. Por eso es una rareza: solo aparece en los
+-- Segun las mediciones: camina hacia el jugador, golpea cuerpo a cuerpo (~40 de dano tras
+-- ~1 s de carga) y acaba explotando (sMacTDeath): el mod completa esa explosion para que
+-- haga dano y lo mate. Por eso es una rareza: solo aparece en los
 -- mapas de Util.TARDIGRADE_BIOMES, y con una probabilidad por oleada.
 -- Su vida y su recompensa se ajustan en Util.ENEMY_TUNING.
 -- Si diera problemas (pantalla en blanco, excepciones), ponerlo en false.

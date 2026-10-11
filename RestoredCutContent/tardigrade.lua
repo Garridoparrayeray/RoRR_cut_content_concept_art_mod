@@ -96,7 +96,7 @@ local function update_monitor()
         return
     end
 
-    -- Cada cambio de animacion (para ver cuando explota y cuanto dura cada fase)
+    -- Cada cambio de animacion (para ver cuando ataca y cuanto dura cada fase)
     local sprite = sprite_name(watched)
     local player = Instance.find_all(gm.constants.oP)[1]
     local distance = -1
@@ -127,6 +127,68 @@ local function update_monitor()
         watched = nil
     end
 end
+
+-- ----------------------------------------------------------------------------
+-- Explosion: el juego original reproduce la animacion de explotar (sMacTDeath) pero ni
+-- hace dano ni mata: el enemigo explota y sigue andando. Aqui se completa: al entrar en
+-- esa animacion con vida, la explosion golpea a los jugadores cercanos y el enemigo muere
+-- (sin dar recompensa: se ha suicidado). Para quitarlo, EXPLODE_ON_DEATH_ANIM = false.
+-- ----------------------------------------------------------------------------
+local EXPLODE_ON_DEATH_ANIM = true
+local EXPLOSION_WIDTH       = 150   -- px de ancho de la zona (se multiplica por el tamano)
+local EXPLOSION_HEIGHT      = 110
+local EXPLOSION_DAMAGE      = 2.0   -- coeficiente sobre el dano del propio enemigo
+local EXPLOSION_SPARKS      = 8
+
+local exploded = {}   -- ids que ya explotaron (una sola vez por enemigo)
+
+local function explode(enemy)
+    local scale = 1
+    pcall(function() scale = math.abs(enemy.image_xscale) end)
+    if scale == 0 then scale = 1 end
+
+    local x, y = enemy.x, enemy.y - 20
+    enemy:fire_explosion(x, y, EXPLOSION_WIDTH * scale, EXPLOSION_HEIGHT * scale,
+        EXPLOSION_DAMAGE, nil, nil, false)
+
+    if gm.constants.oEfExplosion then
+        pcall(function() gm.instance_create(x, y, gm.constants.oEfExplosion) end)
+    end
+    for _ = 1, EXPLOSION_SPARKS do
+        Util.spark_at(x + gm.random_range(-30, 30) * scale, y + gm.random_range(-25, 25))
+    end
+
+    log.info(string.format("[RestoredCutContent] Tardigrado explota en (%.0f,%.0f), tamano x%.2f, coef. dano %.1f",
+        x, y, scale, EXPLOSION_DAMAGE))
+
+    -- Muere sin dar experiencia ni oro: se ha suicidado
+    pcall(function() enemy.exp_worth = 0 end)
+    enemy:kill()
+end
+
+local function update_explosions()
+    if not TARDIGRADE_OBJ or not gm.constants.sMacTDeath then return end
+
+    for _, enemy in ipairs(Instance.find_all(TARDIGRADE_OBJ)) do
+        local id = enemy.id
+        if not exploded[id]
+            and enemy.sprite_index == gm.constants.sMacTDeath
+            and type(enemy.hp) == "number" and enemy.hp > 0 then
+            exploded[id] = true
+            explode(enemy)
+        end
+    end
+end
+
+Callback.add(Callback.TYPE.postStep, "Tardigrade_Explosion", function()
+    if not EXPLODE_ON_DEATH_ANIM or gm._mod_net_isClient() then return end
+    local ok, err = pcall(update_explosions)
+    if not ok then Util.log_once("Tardigrade", err) end
+end)
+
+Callback.add(Callback.TYPE.onStageStart, "Tardigrade_ResetExploded", function()
+    exploded = {}
+end)
 
 -- ----------------------------------------------------------------------------
 -- Aparicion natural: al empezar la fase pueden colocarse Tardigrados por el mapa,

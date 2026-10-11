@@ -310,7 +310,7 @@ end
 -- Las variantes (por ejemplo "boss") sustituyen a los valores base.
 Util.ENEMY_TUNING = {
     oMacT = {
-        hp = 0.7, reward = 1.8,   -- mucha vida y se suicida: si lo matas, que compense
+        hp = 0.7, reward = 1.8,   -- mucha vida y golpea fuerte; si explota solo no da nada
         variants = {
             boss = { hp = 3.0, reward = 4.5, scale = 1.35 },   -- Tardigrado Alfa
         },
