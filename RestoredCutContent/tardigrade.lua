@@ -13,7 +13,8 @@ local Util = (type(loaded) == "table") and loaded or RCC_UTIL
 
 local TARDIGRADE_OBJ = gm.constants.oMacT
 
-local KEY_DEBUG_SPAWN  = 123    -- F12
+local KEY_DEBUG_SPAWN  = 123    -- F12 (con Mays: Tardigrado Alfa)
+local KEY_SHIFT        = 16
 local SPAWN_OFFSET_X   = 150    -- px a la derecha del jugador
 local MONITOR_FRAMES   = 1500   -- 25 s de observacion
 local MONITOR_INTERVAL = 90     -- frames entre lineas del log
@@ -61,13 +62,26 @@ local function spawn_tardigrade(player)
     end
 
     Util.snap_to_ground(inst, 80, 40)
+
+    -- Con Mays pulsada sale el Alfa (jefe); sin ella, el Tardigrado base. Se le aplica el
+    -- mismo ajuste de vida/recompensa/tamano que en una partida normal.
+    local variant = nil
+    if gm.keyboard_check(KEY_SHIFT) == 1.0 then
+        variant = "boss"
+    end
+    Util.tune_enemy(inst, TARDIGRADE_OBJ, variant)
+
     watched = inst
     watch_timer = 0
     last_sprite = nil
     last_player_hp = nil
 
-    log.info("[RestoredCutContent] Tardigrado creado: " .. describe(inst))
-    Util.chat("<g>[TARDIGRADO]</c> Creado. El log registra su comportamiento durante 25 s.")
+    log.info("[RestoredCutContent] Tardigrado creado" .. (variant and " (ALFA)" or "") .. ": " .. describe(inst))
+    if variant then
+        Util.chat("<g>[TARDIGRADO]</c> Alfa creado. El log registra su comportamiento durante 25 s.")
+    else
+        Util.chat("<g>[TARDIGRADO]</c> Creado. El log registra su comportamiento durante 25 s. (Mays+F12 = Alfa)")
+    end
 end
 
 local function update_monitor()
