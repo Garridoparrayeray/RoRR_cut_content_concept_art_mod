@@ -63,8 +63,8 @@ See [`dev_tools/README.md`](dev_tools/README.md).
 | `RestoredCutContent/tardigrade.lua` | Tardigrade: explosion and natural spawning |
 | `RestoredCutContent/assets/` | Sprites and animations of the cut content (Monkey, Restless Oak, drones, items, Chef...), taken from the cut content document and sorted by type |
 | `dev_tools/` | Test and data-extraction tools (not installed) |
-| `docs/mediciones.md` | Measurements taken in-game (in Spanish) |
-| `CHANGELOG.md` | Versions, in order (in Spanish) |
+| `docs/measurements.md` | Measurements taken in-game (also in [Spanish](docs/mediciones.es.md)) |
+| `CHANGELOG.md` | Versions, in order (also in [Spanish](CHANGELOG.es.md)) |
 
 ## How it is developed
 

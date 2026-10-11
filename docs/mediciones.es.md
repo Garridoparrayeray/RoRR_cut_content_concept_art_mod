@@ -1,4 +1,5 @@
 # Mediciones en partida
+**Español** · [English](measurements.md)
 
 El código del juego va compilado (no hay GML legible), así que el comportamiento de los objetos descartados se
 mide en partida con el log del mod (`LogOutput.log`). Esto recoge lo medido hasta ahora.

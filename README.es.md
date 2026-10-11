@@ -49,7 +49,7 @@ Dependencias: ReturnOfModding, ReturnsAPI y RoRR Modding Toolkit.
 
 Las teclas de prueba y las trampas **no forman parte del mod**: están en [`dev_tools/`](dev_tools/) para el equipo.
 Se activan copiando `dev_tools/debug_tools.lua` junto a `main.lua`; sin ese fichero, el mod no carga nada de eso.
-Ver [`dev_tools/README.md`](dev_tools/README.md).
+Ver [`dev_tools/README.es.md`](dev_tools/README.es.md).
 
 ## Estructura
 
@@ -63,8 +63,8 @@ Ver [`dev_tools/README.md`](dev_tools/README.md).
 | `RestoredCutContent/tardigrade.lua` | Tardígrado: explosión y aparición natural |
 | `RestoredCutContent/assets/` | Sprites y animaciones del contenido recortado (Mono, Roble Inquieto, drones, items, Chef...), tomados del documento de contenido descartado y organizados por tipo |
 | `dev_tools/` | Herramientas de prueba y de extracción de datos (no se instalan) |
-| `docs/mediciones.md` | Datos medidos en partida |
-| `CHANGELOG.md` | Versiones, en orden |
+| `docs/mediciones.es.md` | Datos medidos en partida |
+| `CHANGELOG.es.md` | Versiones, en orden |
 
 ## Cómo se trabaja
 

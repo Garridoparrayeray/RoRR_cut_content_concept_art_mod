@@ -1,38 +1,39 @@
-# Herramientas de desarrollo
+# Development tools
 
-Nada de esto forma parte del mod: **quien instala `RestoredCutContent` no tiene modo dios ni teclas de trampa**.
-Estas herramientas son para pruebas del equipo.
+[Español](README.es.md) · **English**
 
-## `debug_tools.lua`: teclas de prueba y trampas
+None of this is part of the mod: **whoever installs `RestoredCutContent` gets no god mode and no cheat keys.**
+These tools are for the team's own testing.
 
-Para usarlo en local, copia `debug_tools.lua` a la carpeta del mod, junto a `main.lua`
-(`ReturnOfModding/plugins/RestoredContent-RestoredCutContent/`). `main.lua` lo carga solo si existe; para
-desactivarlo basta con quitar el fichero.
+## `debug_tools.lua`: test keys and cheats
 
-| Tecla | Acción |
+To use it locally, copy `debug_tools.lua` into the mod folder, next to `main.lua`
+(`ReturnOfModding/plugins/RestoredContent-RestoredCutContent/`). `main.lua` loads it only if it exists; to turn it
+off just remove the file.
+
+| Key | Action |
 |---|---|
-| F5 | Altar de Empoderamiento junto al jugador (no gasta el uso de la fase) |
-| F9 | Altar de Desafío junto al jugador |
-| F6 | Modo Dios (invulnerable, vida máxima, sin cooldowns) |
-| F7 | Mata a todos los enemigos por la vía normal de daño |
-| F8 | +1000 de oro |
-| F10 / F11 | Fotograma siguiente / anterior del altar más cercano |
-| F12 | Tardígrado de prueba (con Mayús, un Alfa); el log registra animaciones, daño recibido y daño hecho |
+| F5 | Empowerment Shrine next to the player (does not use up the stage's single use) |
+| F9 | Challenge Shrine next to the player |
+| F6 | God mode (invulnerable, full health, no cooldowns) |
+| F7 | Kill every enemy through the normal damage path |
+| F8 | +1000 gold |
+| F10 / F11 | Next / previous frame of the nearest shrine |
+| F12 | Test Tardigrade (with Shift, an Alpha); the log records its animations, damage taken and damage dealt |
 
-Los altares se crean mediante `Util.dev_hooks`, que registran los propios módulos del mod; el mod en sí no
-define ninguna tecla.
+Shrines are created through `Util.dev_hooks`, which the mod's own modules register; the mod itself defines no keys.
 
-## `extract/`: extracción de datos del juego
+## `extract/`: extracting data from the game
 
-Scripts de PowerShell que leen `data.win` de tu propia copia del juego para obtener la geometría de los
-fotogramas de un sprite y volcar páginas de textura (BZ2 + QOI). Sirvieron para comprobar el tamaño de los
-fotogramas de los altares y localizar sus animaciones de muerte.
+PowerShell scripts that read `data.win` from your own copy of the game to get the frame geometry of a sprite and to
+dump texture pages (BZ2 + QOI). They were used to check the frame sizes of the shrines and to find their death
+animations.
 
-| Script | Función |
+| Script | Purpose |
 |---|---|
-| `extract_sprites.ps1` | Lista fotogramas (origen y destino en la textura) de los sprites indicados |
-| `dump_pages.ps1` | Vuelca páginas de textura en bruto |
-| `dump_page.ps1` | Decodifica una página QOI y la guarda como PNG |
-| `render_frames.ps1` | Recorta fotogramas de una página decodificada y arma una hoja de contacto |
+| `extract_sprites.ps1` | Lists the frames (source and target rectangles in the texture) of the given sprites |
+| `dump_pages.ps1` | Dumps raw texture pages |
+| `dump_page.ps1` | Decodes a QOI page and saves it as PNG |
+| `render_frames.ps1` | Crops frames from a decoded page and builds a contact sheet |
 
-Se ejecutan con `powershell -File`, pasando la ruta de `data.win`. No incluyen ningún recurso del juego.
+Run them with `powershell -File`, passing the path to `data.win`. They contain no game resources.
