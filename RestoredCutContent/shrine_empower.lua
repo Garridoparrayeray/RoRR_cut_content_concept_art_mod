@@ -164,24 +164,15 @@ local function spawn_shrine_at(x, y)
     return shrine
 end
 
--- Tecla de prueba F5: altar de empoderamiento a la derecha del jugador
-local KEY_DEBUG_SPAWN = 116
-
-Callback.add(Callback.TYPE.postStep, "EmpowerShrine_DebugSpawn", function()
-    if gm.keyboard_check_pressed(KEY_DEBUG_SPAWN) ~= 1.0 then return end
-    if gm._mod_net_isClient() then return end
-
-    local player = Instance.find_all(gm.constants.oP)[1]
-    if not player then return end
-
-    local ok, result = pcall(spawn_shrine_at, player.x + 60, player.y)
-    if ok and result then
-        get_data(result).debug = true   -- las pruebas no gastan el uso de la fase
-        Util.chat("<g>[DEBUG F5]</c> Altar de Empoderamiento creado: $" .. tostring(result.cost) .. " + " .. math.floor(LIFE_FRACTION * 100) .. "% de vida. F8 da oro; pulsa E para probarlo.")
-    else
-        log.error("[RestoredCutContent] F5 fallo: " .. tostring(result))
+-- Gancho para las herramientas de desarrollo (debug_tools.lua, fuera del mod): crea un
+-- altar de prueba que no consume el uso de la fase. El mod no define ninguna tecla.
+Util.dev_hooks.spawn_empower_shrine = function(x, y)
+    local shrine = spawn_shrine_at(x, y)
+    if shrine then
+        get_data(shrine).debug = true
     end
-end)
+    return shrine
+end
 
 -- ----------------------------------------------------------------------------
 -- Generacion por fase

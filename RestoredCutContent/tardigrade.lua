@@ -3,141 +3,17 @@
 -- Macrobic Tardigrade (oMacT): enemigo descartado que sigue en los archivos del
 -- juego con todos sus sprites (Idle, Spawn, Walk, Climb, Shoot1, Death).
 --
--- Prueba: F12 lo crea junto al jugador y el log registra su
--- comportamiento unos segundos, para saber que hace el enemigo original antes de
--- meterlo en los bestiarios.
+-- Este modulo completa dos cosas que el original dejo a medias:
+--   - su explosion (se animaba pero ni daniaba ni mataba)
+--   - su aparicion natural en el mapa, junto a paredes
+-- Su presencia en las hordas del altar de desafio esta en shrine_challenge.lua, y su
+-- vida y recompensa en Util.ENEMY_TUNING.
 -- ============================================================================
 
 local loaded = require("util.lua")
 local Util = (type(loaded) == "table") and loaded or RCC_UTIL
 
 local TARDIGRADE_OBJ = gm.constants.oMacT
-
-local KEY_DEBUG_SPAWN  = 123    -- F12 (con Mays: Tardigrado Alfa)
-local KEY_SHIFT        = 16
-local SPAWN_OFFSET_X   = 150    -- px a la derecha del jugador
-local MONITOR_FRAMES   = 1500   -- 25 s de observacion
-local MONITOR_INTERVAL = 90     -- frames entre lineas del log
-
-local watched = nil             -- instancia observada
-local watch_timer = 0
-local last_sprite = nil
-local last_player_hp = nil
-local last_hp = nil
-
--- Lee un campo sin que un campo inexistente rompa la observacion
-local function read_field(inst, field)
-    local ok, value = pcall(function()
-        return inst[field]
-    end)
-    if not ok then return "<error>" end
-    return tostring(value)
-end
-
-local function sprite_name(inst)
-    local ok, name = pcall(function()
-        return gm.sprite_get_name(inst.sprite_index)
-    end)
-    if ok then return tostring(name) end
-    return "?"
-end
-
-local function describe(inst)
-    return string.format("pos=(%.0f,%.0f) sprite=%s frame=%s hp=%s/%s team=%s",
-        inst.x, inst.y, sprite_name(inst), read_field(inst, "image_index"),
-        read_field(inst, "hp"), read_field(inst, "maxhp"), read_field(inst, "team"))
-end
-
-local function spawn_tardigrade(player)
-    if not TARDIGRADE_OBJ then
-        Util.chat("<r>[TARDIGRADO]</c> oMacT no existe en este juego.")
-        log.error("[RestoredCutContent] oMacT no encontrado en gm.constants")
-        return
-    end
-
-    local inst = gm.instance_create(player.x + SPAWN_OFFSET_X, player.y, TARDIGRADE_OBJ)
-    if not inst or not Instance.exists(inst) then
-        Util.chat("<r>[TARDIGRADO]</c> No se pudo crear la instancia.")
-        log.error("[RestoredCutContent] gm.instance_create devolvio una instancia invalida")
-        return
-    end
-
-    Util.snap_to_ground(inst, 80, 40)
-
-    -- Con Mays pulsada sale el Alfa (jefe); sin ella, el Tardigrado base. Se le aplica el
-    -- mismo ajuste de vida/recompensa/tamano que en una partida normal.
-    local variant = nil
-    if gm.keyboard_check(KEY_SHIFT) == 1.0 then
-        variant = "boss"
-    end
-    Util.tune_enemy(inst, TARDIGRADE_OBJ, variant)
-
-    watched = inst
-    watch_timer = 0
-    last_sprite = nil
-    last_player_hp = nil
-    last_hp = nil
-
-    log.info("[RestoredCutContent] Tardigrado creado" .. (variant and " (ALFA)" or "") .. ": " .. describe(inst))
-    if variant then
-        Util.chat("<g>[TARDIGRADO]</c> Alfa creado. El log registra su comportamiento durante 25 s.")
-    else
-        Util.chat("<g>[TARDIGRADO]</c> Creado. El log registra su comportamiento durante 25 s. (Mays+F12 = Alfa)")
-    end
-end
-
-local function update_monitor()
-    if not watched then return end
-
-    watch_timer = watch_timer + 1
-
-    if not Instance.exists(watched) then
-        log.info(string.format("[RestoredCutContent] Tardigrado: desaparecio tras %d frames", watch_timer))
-        Util.chat("<y>[TARDIGRADO]</c> Ya no existe (murio o se destruyo).")
-        watched = nil
-        return
-    end
-
-    -- Cada cambio de animacion (para ver cuando ataca y cuanto dura cada fase)
-    local sprite = sprite_name(watched)
-    local player = Instance.find_all(gm.constants.oP)[1]
-    local distance = -1
-    if player then
-        distance = math.sqrt((player.x - watched.x) ^ 2 + (player.y - watched.y) ^ 2)
-    end
-    if sprite ~= last_sprite then
-        log.info(string.format("[RestoredCutContent] Tardigrado t=%d: animacion %s -> %s (distancia al jugador %.0f px)",
-            watch_timer, tostring(last_sprite), sprite, distance))
-        last_sprite = sprite
-    end
-
-    -- Dano que recibe el Tardigrado: cada impacto por separado, para comparar habilidades
-    if type(watched.hp) == "number" then
-        if last_hp and watched.hp < last_hp then
-            log.info(string.format("[RestoredCutContent] Tardigrado t=%d: recibe %.0f de dano (%.0f -> %.0f de %s)",
-                watch_timer, last_hp - watched.hp, last_hp, watched.hp, read_field(watched, "maxhp")))
-        end
-        last_hp = watched.hp
-    end
-
-    -- Dano al jugador: atribuido a la animacion en curso
-    if player and type(player.hp) == "number" then
-        if last_player_hp and player.hp < last_player_hp then
-            log.info(string.format("[RestoredCutContent] Tardigrado t=%d: el jugador pierde %.1f de vida (sprite %s, distancia %.0f px)",
-                watch_timer, last_player_hp - player.hp, sprite, distance))
-        end
-        last_player_hp = player.hp
-    end
-
-    if watch_timer % MONITOR_INTERVAL == 0 then
-        log.info(string.format("[RestoredCutContent] Tardigrado t=%d: %s", watch_timer, describe(watched)))
-    end
-
-    if watch_timer >= MONITOR_FRAMES then
-        log.info("[RestoredCutContent] Tardigrado: fin de la observacion")
-        watched = nil
-    end
-end
 
 -- ----------------------------------------------------------------------------
 -- Explosion: el juego original reproduce la animacion de explotar (sMacTDeath) pero ni
@@ -301,17 +177,4 @@ Callback.add(Callback.TYPE.postStep, "Tardigrade_NaturalSpawn", function()
     if not ok then Util.log_once("Tardigrade", err) end
 end)
 
-Callback.add(Callback.TYPE.postStep, "Tardigrade_Debug", function()
-    if gm._mod_net_isClient() then return end
-
-    local player = Instance.find_all(gm.constants.oP)[1]
-    if player and gm.keyboard_check_pressed(KEY_DEBUG_SPAWN) == 1.0 then
-        local ok, err = pcall(spawn_tardigrade, player)
-        if not ok then Util.log_once("Tardigrade", err) end
-    end
-
-    local ok, err = pcall(update_monitor)
-    if not ok then Util.log_once("Tardigrade", err) end
-end)
-
-log.info("[RestoredCutContent] tardigrade.lua cargado (F12 = crear Tardigrado de prueba)")
+log.info("[RestoredCutContent] tardigrade.lua cargado")

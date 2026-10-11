@@ -5,6 +5,10 @@
 
 local Util = RCC_UTIL or {}   -- misma tabla aunque el fichero se ejecute de nuevo
 
+-- Funciones que las herramientas de desarrollo (fuera del mod) pueden usar. Los modulos
+-- las registran; si no hay herramientas cargadas, no hacen nada.
+Util.dev_hooks = Util.dev_hooks or {}
+
 -- GameMaker devuelve 1.0 / 0.0 en lugar de booleanos (0.0 es "true" en Lua)
 function Util.is_true(value)
     return value == true or value == 1.0 or value == 1
@@ -311,8 +315,9 @@ end
 Util.ENEMY_TUNING = {
     oMacT = {
         -- Medido en partida: vida 100 (= Lemurian) y recompensa 20 (Lemurian 6, Wisp 12, Spitter 23).
-        -- Ya paga bien por si mismo: sin ajuste. Si explota solo no da nada.
-        hp = 1.0, reward = 1.0,
+        -- Mas vida (~150, entre Lemurian y Wisp) para que no caiga de un golpe y haya carrera
+        -- contra su explosion, y recompensa proporcional (~15). Si explota solo no da nada.
+        hp = 1.5, reward = 0.75,
         variants = {
             boss = { hp = 3.0, reward = 2.5, scale = 1.35 },   -- Tardigrado Alfa (~300 de vida, ~50 de recompensa)
         },

@@ -15,16 +15,25 @@ local MODULES = {
     "util.lua",
     "shrine_challenge.lua",   -- oShrine6: altar de desafio
     "shrine_empower.lua",     -- oShrineEmpower: altar de empoderamiento
-    "tardigrade.lua",         -- oMacT: Tardigrado (F12 = prueba)
-    "debug_cheats.lua",       -- F5-F8
+    "tardigrade.lua",         -- oMacT: Tardigrado
 }
+
+-- Herramientas de desarrollo (teclas de prueba, modo dios...). NO forman parte del mod:
+-- viven en dev_tools/ del repositorio y solo se cargan si el fichero esta presente.
+local DEV_TOOLS = "debug_tools.lua"
 
 local function load_modules()
     for _, name in ipairs(MODULES) do
         package.loaded[name] = nil
         require(name)
     end
-    log.info("[RestoredCutContent] Modulos cargados: " .. #MODULES .. " (build 2026-10-11-z: F5 empoderamiento, F9 desafio, F6 dios, F7 matar, F8 oro, F10-F11 frames, F12 tardigrado)")
+
+    package.loaded[DEV_TOOLS] = nil
+    if pcall(require, DEV_TOOLS) then
+        log.info("[RestoredCutContent] Herramientas de desarrollo cargadas (" .. DEV_TOOLS .. ")")
+    end
+
+    log.info("[RestoredCutContent] Modulos cargados: " .. #MODULES .. " (build 2026-10-11-ab)")
 end
 
 Initialize(load_modules)

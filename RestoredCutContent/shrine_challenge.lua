@@ -233,24 +233,9 @@ local function spawn_shrine_at(x, y)
     return shrine
 end
 
--- Tecla de prueba F9: altar de desafio a la izquierda del jugador
-local KEY_DEBUG_SPAWN = 120
-
-Callback.add(Callback.TYPE.postStep, "ChallengeShrine_DebugSpawn", function()
-    if gm.keyboard_check_pressed(KEY_DEBUG_SPAWN) ~= 1.0 then return end
-    if gm._mod_net_isClient() then return end
-
-    local player = Instance.find_all(gm.constants.oP)[1]
-    if not player then return end
-
-    local ok, result = pcall(spawn_shrine_at, player.x - 60, player.y)
-    if ok and result then
-        Util.chat("<g>[DEBUG F9]</c> Altar de Desafío creado ($" .. tostring(result.cost) .. "). Pulsa E para activarlo.")
-        log.info(string.format("[RestoredCutContent] F9: altar de desafio en (%.1f, %.1f), coste %s", result.x, result.y, tostring(result.cost)))
-    else
-        log.error("[RestoredCutContent] F9 fallo: " .. tostring(result))
-    end
-end)
+-- Gancho para las herramientas de desarrollo (debug_tools.lua, fuera del mod).
+-- El mod no define ninguna tecla.
+Util.dev_hooks.spawn_challenge_shrine = spawn_shrine_at
 
 Callback.add(Callback.TYPE.onStageStart, "ChallengeShrine_ResetStage", function()
     shrine_spawned_this_stage = false
