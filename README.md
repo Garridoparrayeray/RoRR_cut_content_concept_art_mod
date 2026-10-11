@@ -58,6 +58,7 @@ Ver [`dev_tools/README.md`](dev_tools/README.md).
 | `RestoredCutContent/shrine_challenge.lua` | Altar de Desafío |
 | `RestoredCutContent/shrine_empower.lua` | Altar de Empoderamiento |
 | `RestoredCutContent/tardigrade.lua` | Tardígrado: explosión y aparición natural |
+| `RestoredCutContent/assets/` | Sprites y animaciones del contenido recortado (Mono, Roble Inquieto, drones, items, Chef...), tomados del documento de contenido descartado y organizados por tipo |
 | `dev_tools/` | Herramientas de prueba y de extracción de datos (no se instalan) |
 | `docs/mediciones.md` | Datos medidos en partida |
 | `CHANGELOG.md` | Versiones, en orden |
