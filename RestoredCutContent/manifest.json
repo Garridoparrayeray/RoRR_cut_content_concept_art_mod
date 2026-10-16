@@ -1,11 +1,11 @@
 {
     "name": "RestoredCutContent",
-    "version_number": "0.1.0",
+    "version_number": "0.2.0",
     "website_url": "https://github.com",
     "description": "Restores cut content, unused shrines, skills and monsters from RoRR development concept art.",
     "dependencies": [
         "ReturnOfModding-ReturnOfModding-1.1.30",
-        "ReturnsAPI-ReturnsAPI-0.1.58",
+        "ReturnsAPI-ReturnsAPI-0.1.59",
         "RoRRModdingToolkit-RoRR_Modding_Toolkit-1.2.26"
     ]
 }

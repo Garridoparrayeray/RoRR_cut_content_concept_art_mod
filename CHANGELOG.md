@@ -7,6 +7,7 @@ Per-file detail is in the commits themselves (their messages are in Spanish).
 
 | Date | Build | Change |
 |---|---|---|
+| 2026-10-16 17:50 | 0.2.0 (10-16-ad) | Major Cut Content Expansion: Among Us Impostor survivor with authentic pixel art, 3-hit knife combo, execution pistol (+60% speed), subterranean vent stealth with Mario pipe leap & 6s duration, Emergency Meeting with authentic alarm & void ejection (Ancient Scepter boost); Space Monkey enemy with acrobatic roll animations; Restless Oak enemy with stomp attack & difficulty scaling; CHEF Ice Cube skill; Kentucky Fried Lemurian item; Challenge & Empower Shrine fixes; floating emote system; interactive ImGui debug panel & F1-F12 hotkeys; in-game cut content search & catalog. |
 | 2026-10-10 15:09 | — | Original code, before any fixes |
 | 2026-10-10 15:48 | — | Gold cost of the shrines scales with threat |
 | 2026-10-10 15:51 | 10-10-c | Test keys F5/F9 moved into each shrine module |

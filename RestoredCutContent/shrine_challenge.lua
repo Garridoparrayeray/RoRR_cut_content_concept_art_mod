@@ -45,7 +45,7 @@ local DEATH_AFTER_AT  = 5       -- replica con el pico de la explosion
 local DEBRIS_BURST    = 16
 local DEBRIS_AFTER    = 7
 
-local CRUMBLE_FRAMES  = 110     -- sobrecarga previa al estallido
+local CRUMBLE_FRAMES  = 60      -- sobrecarga previa al estallido
 local CRUMBLE_SHAKE   = 3.2     -- temblor maximo en px
 local CRUMBLE_SPARKS  = 14      -- intervalo base entre chispas
 
@@ -124,13 +124,13 @@ local POOL_NAMES = {
 -- esta aqui (stage de otro mod, por ejemplo) se usa el bestiario por fase de arriba.
 local BIOME_POOLS = {
     driedlake         = { name = "Lago Seco",              light = { "oLizard", "oWisp" },   medium = { "oCrab", "oSpitter" },  heavy = { "oLizard" } },
-    desolateforest    = { name = "Bosque Desolado", light = { "oBug", "oLizard" },    medium = { "oBoar", "oSpitter" }, heavy = { "oLizard" } },
-    dampcaverns       = { name = "Cavernas Humedas", light = { "oLizard", "oJelly" },  medium = { "oClay", "oMush" }, heavy = { "oGolem" } },
-    skymeadow         = { name = "Pradera Celestial",      light = { "oWisp", "oJelly" },    medium = { "oSpitter", "oClay" },  heavy = { "oGolem" } },
-    ancientvalley     = { name = "Valle Antiguo",          light = { "oLizard", "oClay" },   medium = { "oGolem", "oBison" },   heavy = { "oWispB", "oBison" } },
+    desolateforest    = { name = "Bosque Desolado",        light = { "oBug", "oLizard", "Monkey" }, medium = { "oBoar", "oSpitter" }, heavy = { "oLizard", "oGolem" } },
+    dampcaverns       = { name = "Cavernas Humedas",       light = { "oLizard", "oJelly" },  medium = { "oClay", "oMush" },     heavy = { "oGolem" } },
+    skymeadow         = { name = "Pradera Celestial",      light = { "oWisp", "oJelly", "Monkey" }, medium = { "oSpitter", "oClay" },  heavy = { "oGolem" } },
+    ancientvalley     = { name = "Valle Antiguo",          light = { "oLizard", "oClay" },   medium = { "oGolem", "oBison" },   heavy = { "oWispB", "oBison", "RestlessOak" } },
     sunkentombs       = { name = "Tumbas Hundidas",        light = { "oLizard", "oClay" },   medium = { "oGolem", "oSpitter" }, heavy = { "oWispB", "oBison" } },
-    magmabarracks     = { name = "Cuartel de Magma",       light = { "oImp", "oSpider" },    medium = { "oImpM", "oGolem" },    heavy = { "oWispB", "oBison" } },
-    hivecluster       = { name = "Colmena", light = { "oSpider", "oBug" },    medium = { "oImpM", "oGuard" }, heavy = { "oWispB", "oGolem" } },
+    magmabarracks     = { name = "Cuartel de Magma",       light = { "oImp", "oSpider" },    medium = { "oImpM", "oGolem", "Monkey" }, heavy = { "oWispB", "oBison" } },
+    hivecluster       = { name = "Colmena",                light = { "oSpider", "oBug" },    medium = { "oImpM", "oGuard" },    heavy = { "oWispB", "oGolem" } },
     templeoftheelders = { name = "Templo de los Ancianos", light = { "oChild", "oImp" },     medium = { "oGuard", "oGolem" },   heavy = { "oGolemG", "oWispB" } },
 }
 
@@ -200,27 +200,57 @@ end
 -- ----------------------------------------------------------------------------
 local read_difficulty = Util.read_difficulty
 
-local function current_cost()
-    return Util.gold_cost(COST_BASE, COST_PER_THREAT)
+local function current_cost(uses)
+    local u = uses or 0
+    local base = Util.gold_cost(COST_BASE, COST_PER_THREAT)
+    local multiplier = (1.55) ^ u
+    return math.floor(base * multiplier)
 end
 
 -- ----------------------------------------------------------------------------
 -- Configuracion y generacion del altar
 -- ----------------------------------------------------------------------------
 local function configure_shrine(shrine)
-    shrine.cost        = current_cost()
+    local data = get_data(shrine)
+    data.uses          = data.uses or 0
+    local cost         = current_cost(data.uses)
+
+    -- 1. Inicializacion nativa de interactable primero
+    pcall(function()
+        if shrine.interactable_init then shrine:interactable_init() end
+    end)
+
+    -- 2. Mascara de colision solida y generosa (sChest1 garantiza deteccion nativa)
+    shrine.mask_index = gm.constants.sChest1 or gm.constants.sShrine1 or SHRINE_SPRITE
+
+    -- 3. Inicializacion del coste en el motor nativo
+    pcall(function()
+        if gm.interactable_init_cost then
+            gm.interactable_init_cost(shrine, 0, cost)
+        end
+        if shrine.interactable_init_cost then
+            shrine:interactable_init_cost(0, cost)
+        end
+    end)
+
+    -- 4. Propiedades y estado del altar
+    shrine.cost        = cost
     shrine.cost_type   = 0   -- oro
     shrine.active      = 0
-    shrine.use_max     = 1
+    shrine.use_max     = 99  -- Altar reutilizable
     shrine.visible     = true
-    shrine.image_index = 0
+    shrine.image_index = FRAME_IDLE
     shrine.image_speed = 0
     shrine.image_blend = Util.BLEND_NORMAL
     if SHRINE_SPRITE then
         shrine.sprite_index = SHRINE_SPRITE
     end
+
+    pcall(function()
+        if shrine.interactable_init_name then shrine:interactable_init_name() end
+    end)
+
     Util.snap_to_ground(shrine, 80, 40)
-    get_data(shrine)
 end
 
 local function spawn_shrine_at(x, y)
@@ -364,23 +394,43 @@ end
 -- aparecen de golpe: process_spawn_queue saca uno cada pocos frames.
 local function start_wave(data)
     local stage_num, threat = read_difficulty()
+    local uses = data.uses or 0
+    -- Con cada uso sucesivo, el desafio es significativamente mas complicado:
+    -- Amenaza escalada: +2.5 puntos de amenaza por uso previo
+    local effective_threat = threat + (uses * 2.5)
     local pool = get_pool(stage_num)
-    local title, plan = plan_wave(pool, threat)
+    local title, plan = plan_wave(pool, effective_threat)
 
-    Util.chat("<y>[Altar de Desafío]</c> " .. title .. " (" .. #plan .. " enemigos | " .. pool.name .. ")")
+    -- Cada uso adicional anade enemigos mas a la horda y mayor ratio de elites
+    if uses > 0 then
+        for u = 1, uses * 2 do
+            local base_entry = plan[gm.irandom_range(1, #plan)]
+            if base_entry then
+                table.insert(plan, {
+                    obj = base_entry.obj,
+                    variant = base_entry.variant,
+                    is_elite = (gm.random(1.0) < math.min(0.85, 0.40 + uses * 0.15))
+                })
+            end
+        end
+    end
+
+    Util.chat(string.format("<y>[Altar de Desafío]</c> %s (%d enemigos | Nivel %d | %s)", 
+        title, #plan, uses + 1, pool.name))
 
     data.queue = plan
     data.queue_index = 0
     data.spawn_cooldown = 0
-    data.allow_blighted = threat >= BLIGHTED_MIN_THREAT and stage_num >= BLIGHTED_MIN_STAGE
+    data.allow_blighted = (effective_threat >= BLIGHTED_MIN_THREAT and stage_num >= BLIGHTED_MIN_STAGE) or (uses >= 2)
     data.blighted_used = false
 
     data.mobs = {}
     data.alive_count = #plan       -- cuenta los que aun no han aparecido
     data.initial_count = #plan
-    data.threat = threat
+    data.threat = effective_threat
     data.stage_num = stage_num
-    log.info(string.format("[RestoredCutContent] Horda: %d enemigos (%s, amenaza %.2f)", #plan, pool.name, threat))
+    log.info(string.format("[RestoredCutContent] Horda (Uso %d): %d enemigos (%s, amenaza %.2f)", 
+        uses + 1, #plan, pool.name, effective_threat))
 end
 
 -- Coloca un enemigo del plan junto al altar con un destello de aparicion
@@ -449,28 +499,110 @@ end
 -- ----------------------------------------------------------------------------
 -- Recompensa
 -- ----------------------------------------------------------------------------
-local function pick_reward_tier(threat, stage_num)
-    if threat < 2.2 and stage_num == 1 then
-        return Item.TIER.common
-    elseif threat < 4.2 then
-        if gm.irandom_range(1, 2) == 1 then return Item.TIER.uncommon end
-        return Item.TIER.common
-    elseif threat < 6.8 then
-        return Item.TIER.uncommon
+local TIER_COMMON   = 0
+local TIER_UNCOMMON = 1
+local TIER_RARE     = 2
+
+local function pick_reward_tier(threat, stage_num, uses)
+    local u = uses or 0
+    if u <= 0 then
+        if threat < 2.2 and stage_num == 1 then
+            return TIER_COMMON
+        elseif threat < 4.5 then
+            if gm.irandom_range(1, 2) == 1 then return TIER_UNCOMMON end
+            return TIER_COMMON
+        else
+            return TIER_UNCOMMON
+        end
+    elseif u == 1 then
+        if threat < 4.0 then
+            return TIER_UNCOMMON
+        elseif threat < 7.0 then
+            if gm.irandom_range(1, 3) == 1 then return TIER_RARE end
+            return TIER_UNCOMMON
+        else
+            if gm.irandom_range(1, 2) == 1 then return TIER_RARE end
+            return TIER_UNCOMMON
+        end
+    else
+        -- 3er uso en adelante (u >= 2)
+        if u >= 3 or gm.irandom_range(1, 2) == 1 then
+            return TIER_RARE
+        else
+            return TIER_UNCOMMON
+        end
     end
-    if gm.irandom_range(1, 3) == 1 then return Item.TIER.rare end
-    return Item.TIER.uncommon
 end
 
 local function give_reward(shrine, data)
-    local item = Item.get_random(pick_reward_tier(data.threat, data.stage_num))
-    if item then
-        item:create(shrine.x, shrine.y - 32)
-        log.info("[RestoredCutContent] Desafio: recompensa " .. tostring(item.identifier))
-    else
-        gm.instance_create(shrine.x, shrine.y - 16, gm.constants.oChest1)
-        log.info("[RestoredCutContent] Desafio: sin objeto aleatorio, cofre de respaldo")
+    local uses = data.uses or 0
+    local tier = pick_reward_tier(data.threat, data.stage_num, uses)
+    local tier_name = (tier == TIER_RARE and "Raro (Rojo)") or ((tier == TIER_UNCOMMON and "Poco Común (Verde)") or "Común (Blanco)")
+    local spawned = false
+
+    -- Metodo 1: LootPool.wrap(tier):roll() (ReturnsAPI oficial)
+    local ok1, res1 = pcall(function()
+        local pool = LootPool.wrap(tier)
+        if pool and pool.roll then
+            local item = pool:roll()
+            if item and item.create then
+                local inst = item:create(shrine.x, shrine.y - 36)
+                if inst and Instance.exists(inst) then
+                    inst.hspeed = 0
+                end
+                return item.identifier or true
+            end
+        end
+        return nil
+    end)
+    if ok1 and res1 then
+        spawned = true
+        log.info(string.format("[RestoredCutContent] Desafio: recompensa %s via LootPool:roll()", tostring(res1)))
     end
+
+    -- Metodo 2: gm.treasure_weights_roll_pickup (Nativo RoRR / Starstorm)
+    if not spawned then
+        local weight_id = (tier >= TIER_RARE and 29) or ((tier == TIER_UNCOMMON and 1) or 0)
+        local ok2, pickup = pcall(gm.treasure_weights_roll_pickup, weight_id)
+        if not ok2 or not pickup or pickup <= 0 then
+            ok2, pickup = pcall(gm.treasure_weights_roll_pickup, 0)
+        end
+        if ok2 and pickup and pickup > 0 then
+            local ok3, item_id = pcall(gm.object_to_item, pickup)
+            if ok3 and item_id and item_id ~= -1 then
+                local ok4, item = pcall(Item.wrap, item_id)
+                if ok4 and item and item.create then
+                    local inst = item:create(shrine.x, shrine.y - 36)
+                    if inst and Instance.exists(inst) then
+                        inst.hspeed = 0
+                    end
+                    spawned = true
+                    log.info(string.format("[RestoredCutContent] Desafio: recompensa %s via Item.wrap", tostring(item.identifier)))
+                end
+            end
+            if not spawned then
+                local ok5 = pcall(gm.item_drop_object, pickup, shrine.x, shrine.y + 4, nil, false)
+                if ok5 then
+                    spawned = true
+                    log.info("[RestoredCutContent] Desafio: recompensa lanzada via item_drop_object")
+                end
+            end
+        end
+    end
+
+    -- Metodo 3: Cofre de respaldo que se abre de inmediato y expulsa el objeto
+    if not spawned then
+        local chest_obj = (tier >= TIER_RARE and gm.constants.oChest2) or gm.constants.oChest1
+        local chest = gm.instance_create(shrine.x, shrine.y - 18, chest_obj)
+        if chest and Instance.exists(chest) then
+            chest.cost = 0
+            chest.active = 1
+            log.info("[RestoredCutContent] Desafio: recompensa generada via cofre auto-abrible")
+            spawned = true
+        end
+    end
+
+    Util.chat(string.format("<g>[Altar de Desafío]</c> ¡Recompensa concedida! Objeto de grado: %s", tier_name))
 end
 
 -- ----------------------------------------------------------------------------
@@ -583,9 +715,12 @@ local function victory(shrine, data)
     data.phase = "crumbling"
     data.timer = 0
     data.crumble_t = nil
+    shrine.active = 2   -- bloquea cualquier interaccion
+    shrine.image_blend = Util.BLEND_NORMAL -- quitar inmediatamente el color azul de combate!
     Util.play_sound(SND_WIN, 1.0, 1.0, shrine.x, shrine.y)
-    Util.chat("<g>[Altar de Desafío]</c> ¡Horda derrotada! El altar se sobrecarga...")
-    log.info(string.format("[RestoredCutContent] Desafio: victoria (amenaza %.2f, fase %d)", data.threat, data.stage_num))
+    pcall(function() shrine:screen_shake(6) end)
+    Util.chat("<g>[Altar de Desafío]</c> ¡Horda derrotada! El altar entrega su poder y se sobrecarga...")
+    log.info(string.format("[RestoredCutContent] Desafio: victoria (amenaza %.2f)", data.threat))
     give_reward(shrine, data)
 end
 
@@ -793,9 +928,88 @@ local function update_shrine(shrine)
         data.cost_timer = (data.cost_timer or 0) + 1
         if data.cost_timer >= COST_REFRESH then
             data.cost_timer = 0
-            shrine.cost = current_cost()
+            local new_cost = current_cost(data.uses)
+            shrine.cost = new_cost
+            pcall(function()
+                if gm.interactable_init_cost then
+                    gm.interactable_init_cost(shrine, 0, new_cost)
+                end
+                if shrine.interactable_init_cost then
+                    shrine:interactable_init_cost(0, new_cost)
+                end
+            end)
         end
-        if shrine.active == 1 or shrine.active == 2 then
+
+        local triggered_by_native = (shrine.active == 1 or shrine.active == 2)
+        local triggered_by_player = false
+        local buyer = nil
+
+        -- Deteccion de interaccion por proximidad si el motor nativo de GameMaker no lo hace
+        if not triggered_by_native and (shrine.active ~= 1 and shrine.active ~= 2) then
+            local players = Instance.find_all(gm.constants.oP)
+            for _, player in ipairs(players) do
+                if Instance.exists(player) and player.hp > 0 then
+                    local dx = math.abs(player.x - shrine.x)
+                    local dy = math.abs(player.y - shrine.y)
+                    local in_range = (dx <= 140 and dy <= 130)
+                    if not in_range then
+                        pcall(function()
+                            if shrine.place_meeting and Util.bool(shrine:place_meeting(shrine.x, shrine.y, player)) then
+                                in_range = true
+                            elseif player.place_meeting and Util.bool(player:place_meeting(player.x, player.y, shrine)) then
+                                in_range = true
+                            elseif shrine.distance_to_object and shrine:distance_to_object(player) <= 95 then
+                                in_range = true
+                            end
+                        end)
+                    end
+
+                    if in_range then
+                        if Util.is_interact_pressed(player) then
+                            local gold = Util.get_available_gold(player)
+                            local cost = shrine.cost or current_cost(data.uses)
+                            if gold >= cost then
+                                local paid_native = false
+                                pcall(function()
+                                    if gm.interactable_pay_cost then
+                                        gm.interactable_pay_cost(shrine, player)
+                                        paid_native = true
+                                    elseif shrine.interactable_pay_cost then
+                                        shrine:interactable_pay_cost(player)
+                                        paid_native = true
+                                    end
+                                end)
+                                if not paid_native then
+                                    Util.deduct_gold(player, cost)
+                                end
+                                Util.play_sound(gm.constants.wCoin or gm.constants.wChest1, 1.0, 1.0, shrine.x, shrine.y)
+                                triggered_by_player = true
+                                buyer = player
+                                log.info(string.format("[RestoredCutContent] Desafio: altar activado por jugador (Coste: %d, Oro restante: %d)", cost, math.max(0, gold - cost)))
+                                break
+                            else
+                                data.warn_cooldown = (data.warn_cooldown or 0) - 1
+                                if data.warn_cooldown <= 0 then
+                                    data.warn_cooldown = 45
+                                    Util.play_sound(gm.constants.wError or gm.constants.wBossTear, 0.7, 1.2, shrine.x, shrine.y)
+                                    Util.chat(string.format("<r>[Altar de Desafío]</c> Necesitas $%d (Tienes: $%d).", cost, gold))
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if triggered_by_native or triggered_by_player then
+            if not buyer then
+                local lp = (Player and Player.get_local and Player.get_local()) or (Instance.find_all(gm.constants.oP)[1])
+                buyer = lp
+            end
+            if buyer then
+                data.activator = buyer.id
+                shrine.activator = buyer.id
+            end
             begin_charge(shrine, data)
         end
 
@@ -805,7 +1019,7 @@ local function update_shrine(shrine)
         update_beam(shrine, data)
     elseif phase == "combat" then
         update_combat(shrine, data)
-    elseif phase == "crumbling" then
+    elseif phase == "crumbling" or phase == "victory" then
         update_crumbling(shrine, data)
     elseif phase == "exploding" then
         update_exploding(shrine, data)

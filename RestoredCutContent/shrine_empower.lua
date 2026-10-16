@@ -72,32 +72,33 @@ buff_empower.is_timed  = true
 buff_empower.show_icon = false
 
 -- Buff.new devuelve el buff existente al recargar: limpiar para no duplicar callbacks
-buff_empower:clear_callbacks()
+pcall(function() buff_empower:clear_callbacks() end)
 
-buff_empower:add_callback("onPostStatRecalc", function(actor, stack)
-    actor.damage          = actor.damage * (1 + BONUS_DAMAGE * stack)
-    actor.attack_speed    = actor.attack_speed * (1 + BONUS_ATTACK * stack)
-    actor.critical_chance = actor.critical_chance + BONUS_CRIT * stack
-    actor.pHmax           = actor.pHmax * (1 + BONUS_SPEED * stack)
-end)
+pcall(function()
+    if buff_empower.add_callback then
+        buff_empower:add_callback("onPostStatRecalc", function(actor, stack)
+            actor.damage          = actor.damage * (1 + BONUS_DAMAGE * stack)
+            actor.attack_speed    = actor.attack_speed * (1 + BONUS_ATTACK * stack)
+            actor.critical_chance = actor.critical_chance + BONUS_CRIT * stack
+            actor.pHmax           = actor.pHmax * (1 + BONUS_SPEED * stack)
+        end)
 
--- Impacto sagrado: el golpe extra no puede volver a disparar el efecto
-local firing_bonus_hit = false
+        buff_empower:add_callback("onAttackHit", function(actor, victim, stack, hit_info)
+            if firing_bonus_hit then return end
+            if gm.random(1.0) >= PROC_CHANCE then return end
 
-buff_empower:add_callback("onAttackHit", function(actor, victim, stack, hit_info)
-    if firing_bonus_hit then return end
-    if gm.random(1.0) >= PROC_CHANCE then return end
-
-    firing_bonus_hit = true
-    pcall(function()
-        if not victim:exists() then return end
-        actor:fire_direct(victim, PROC_COEFF * stack, 0, nil, nil, gm.constants.sNone, false)
-        if gm.constants.oEfCircle then
-            gm.instance_create(victim.x, victim.y, gm.constants.oEfCircle)
-        end
-        Util.play_sound(gm.constants.wLevelUp, 0.5, 1.8, victim.x, victim.y)
-    end)
-    firing_bonus_hit = false
+            firing_bonus_hit = true
+            pcall(function()
+                if not Instance.exists(victim) then return end
+                actor:fire_direct(victim, PROC_COEFF * stack, 0, nil, nil, gm.constants.sNone, false)
+                if gm.constants.oEfCircle then
+                    gm.instance_create(victim.x, victim.y, gm.constants.oEfCircle)
+                end
+                Util.play_sound(gm.constants.wLevelUp, 0.5, 1.8, victim.x, victim.y)
+            end)
+            firing_bonus_hit = false
+        end)
+    end
 end)
 
 -- ----------------------------------------------------------------------------
@@ -137,10 +138,31 @@ local function life_cost_for(player)
 end
 
 local function configure_shrine(shrine)
+    local cost = current_gold_cost()
+
+    -- 1. Inicializacion nativa de interactable primero
+    pcall(function()
+        if shrine.interactable_init then shrine:interactable_init() end
+    end)
+
+    -- 2. Mascara de colision solida y generosa (sChest1)
+    shrine.mask_index = gm.constants.sChest1 or gm.constants.sShrine1 or SHRINE_SPRITE
+
+    -- 3. Inicializacion del coste en el motor nativo
+    pcall(function()
+        if gm.interactable_init_cost then
+            gm.interactable_init_cost(shrine, 0, cost)
+        end
+        if shrine.interactable_init_cost then
+            shrine:interactable_init_cost(0, cost)
+        end
+    end)
+
+    -- 4. Propiedades y estado del altar
+    shrine.cost        = cost
+    shrine.cost_type   = 0   -- oro (la vida se descuenta al activarlo)
     shrine.active      = 0
     shrine.use_max     = 1
-    shrine.cost        = current_gold_cost()
-    shrine.cost_type   = 0   -- oro (la vida se descuenta al activarlo)
     shrine.visible     = true
     shrine.image_index = 0
     shrine.image_speed = 0
@@ -148,6 +170,10 @@ local function configure_shrine(shrine)
     if SHRINE_SPRITE then
         shrine.sprite_index = SHRINE_SPRITE
     end
+
+    pcall(function()
+        if shrine.interactable_init_name then shrine:interactable_init_name() end
+    end)
 
     Util.snap_to_ground(shrine, 80, 40)
     get_data(shrine)
@@ -205,7 +231,7 @@ local function find_activator(shrine)
     pcall(function()
         if shrine.activator then
             local wrapped = Instance.wrap(shrine.activator)
-            if wrapped:exists() then activator = wrapped end
+            if Instance.exists(wrapped) then activator = wrapped end
         end
     end)
     return activator or Util.nearest_player(shrine.x, shrine.y)
@@ -234,7 +260,7 @@ local function start_blessing(shrine, data)
     end
 
     local player = find_activator(shrine)
-    if player and player:exists() then
+    if player and Instance.exists(player) then
         -- El oro ya lo cobro el motor; aqui se ofrece la vida
         local life = life_cost_for(player)
         if life > 0 then
@@ -387,10 +413,86 @@ local function update_shrine(shrine)
         data.cost_timer = (data.cost_timer or 0) + 1
         if data.cost_timer >= COST_REFRESH then
             data.cost_timer = 0
-            shrine.cost = current_gold_cost()
+            local new_cost = current_gold_cost()
+            shrine.cost = new_cost
+            pcall(function()
+                if gm.interactable_init_cost then
+                    gm.interactable_init_cost(shrine, 0, new_cost)
+                end
+                if shrine.interactable_init_cost then
+                    shrine:interactable_init_cost(0, new_cost)
+                end
+            end)
         end
 
-        if shrine.active == 1 or shrine.active == 2 then
+        local triggered_by_native = (shrine.active == 1 or shrine.active == 2)
+        local triggered_by_player = false
+        local buyer = nil
+
+        if not triggered_by_native and (shrine.active ~= 1 and shrine.active ~= 2) then
+            local players = Instance.find_all(gm.constants.oP)
+            for _, player in ipairs(players) do
+                if Instance.exists(player) and player.hp > 0 then
+                    local dx = math.abs(player.x - shrine.x)
+                    local dy = math.abs(player.y - shrine.y)
+                    local in_range = (dx <= 140 and dy <= 130)
+                    if not in_range then
+                        pcall(function()
+                            if shrine.place_meeting and Util.bool(shrine:place_meeting(shrine.x, shrine.y, player)) then
+                                in_range = true
+                            elseif player.place_meeting and Util.bool(player:place_meeting(player.x, player.y, shrine)) then
+                                in_range = true
+                            elseif shrine.distance_to_object and shrine:distance_to_object(player) <= 95 then
+                                in_range = true
+                            end
+                        end)
+                    end
+
+                    if in_range then
+                        if Util.is_interact_pressed(player) then
+                            local gold = Util.get_available_gold(player)
+                            local cost = shrine.cost or current_gold_cost()
+                            if gold >= cost then
+                                local paid_native = false
+                                pcall(function()
+                                    if gm.interactable_pay_cost then
+                                        gm.interactable_pay_cost(shrine, player)
+                                        paid_native = true
+                                    elseif shrine.interactable_pay_cost then
+                                        shrine:interactable_pay_cost(player)
+                                        paid_native = true
+                                    end
+                                end)
+                                if not paid_native then
+                                    Util.deduct_gold(player, cost)
+                                end
+                                Util.play_sound(gm.constants.wCoin or gm.constants.wChest1, 1.0, 1.0, shrine.x, shrine.y)
+                                triggered_by_player = true
+                                buyer = player
+                                log.info(string.format("[RestoredCutContent] Empoderamiento: altar activado por jugador (Coste: %d)", cost))
+                                break
+                            else
+                                data.warn_cooldown = (data.warn_cooldown or 0) - 1
+                                if data.warn_cooldown <= 0 then
+                                    data.warn_cooldown = 45
+                                    Util.play_sound(gm.constants.wError or gm.constants.wBossTear, 0.7, 1.2, shrine.x, shrine.y)
+                                    Util.chat(string.format("<r>[Altar de Empoderamiento]</c> Necesitas $%d (Tienes: $%d).", cost, gold))
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        if triggered_by_native or triggered_by_player then
+            if not buyer then
+                local lp = (Player and Player.get_local and Player.get_local()) or (Instance.find_all(gm.constants.oP)[1])
+                buyer = lp
+            end
+            if buyer then
+                shrine.activator = buyer.id
+            end
             start_blessing(shrine, data)
         end
 

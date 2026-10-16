@@ -4,6 +4,16 @@
 
 Generado a partir del historial de git: cada entrada es una version real, con la build que llevaba.
 
+- **2026-10-16 17:50** — [v0.2.0 / build 2026-10-16-ad] Gran expansion de contenido recortado:
+  - Superviviente Impostor (Among Us): sprites pixel art autenticos (idle, caminar con cuchillo, salto, caida, trepar, muerte), combo de punalada Z, pistolazo ejecutor X (+60% velocidad al eliminar), sigilo de ventilacion C (salto Mario Bros, hasta 6s bajo tierra, rastro de polvo, salida con salto o habilidad), y Reunion de Emergencia V (alarma de emergencia, reinicio de habilidades, congelacion de pantalla y expulsion al vacio). Compatible con Ancient Scepter.
+  - Enemigo Mono Espacial (Space Monkey / Lemuriano acrobata): sprites extraidos de concept art, animaciones de salto, rueda y muerte, IA acrobatica y comportamientos de combate.
+  - Enemigo Roble Inquieto (Restless Oak): sprites autenticos, animacion de ataque/pisoton, ajuste de generacion por dificultad alta y mapas forestales.
+  - Habilidad CHEF Cubo de Hielo: proyectil rebotante de hielo con ralentizacion/congelacion.
+  - Item Kentucky Fried Lemurian (KFL): consumible descartado que otorga curacion rapida y aumento de velocidad de movimiento.
+  - Altares de Desafio y Empoderamiento: correccion de ciclo de vida, eliminacion de tintes y duplicados, caida y animacion de destruccion correctas.
+  - Sistema de Emoticonos: aplausos, auxilio/peligro y muerte flotantes sobre el jugador.
+  - Herramientas de Desarrollo y Debug: panel interactivo ImGui en pantalla con controles completos y atajos F1-F12.
+  - Motor de busqueda y catalogo de contenido integrado en el juego.
 - **2026-10-11 15:37** — Add credits section to README
 - **2026-10-10 15:09** — Codigo original, antes de las correcciones
 - **2026-10-10 15:48** — coste en oro de los altares escalado por la amenaza

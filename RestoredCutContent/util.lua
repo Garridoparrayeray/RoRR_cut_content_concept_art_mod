@@ -14,10 +14,33 @@ function Util.is_true(value)
     return value == true or value == 1.0 or value == 1
 end
 
+function Util.bool(value)
+    return value == true or value == 1.0 or value == 1 or (type(value) == "number" and value > 0)
+end
+
 function Util.play_sound(snd, volume, pitch, x, y)
     if not snd then return end
     pcall(function()
-        gm.sound_play_networked(snd, volume or 1.0, pitch or 1.0, x or 0, y or 0)
+        local s = snd
+        if type(s) == "table" or type(s) == "userdata" then
+            if s.play then
+                s:play(x or 0, y or 0, volume or 1.0, pitch or 1.0)
+                return
+            elseif s.value then
+                s = s.value
+            end
+        end
+        local vol = volume or 1.0
+        local pit = pitch or 1.0
+        local px = x or 0
+        local py = y or 0
+        if gm.sound_play_at then
+            gm.sound_play_at(s, vol, pit, px, py)
+        elseif gm.sound_play_networked then
+            gm.sound_play_networked(s, vol, pit, px, py)
+        elseif gm.sound_play then
+            gm.sound_play(s, vol, pit)
+        end
     end)
 end
 
@@ -52,13 +75,21 @@ local function lerp(a, b, t)
     return a + (b - a) * t
 end
 
--- Mezcla de dos colores {r, g, b} que devuelve otra tabla {r, g, b}
--- (para encadenar mezclas; mix_blend devuelve ya el entero para image_blend)
+local function to_rgb_table(c)
+    if type(c) == "table" then return c end
+    if type(c) == "number" then
+        return { c % 256, math.floor(c / 256) % 256, math.floor(c / 65536) % 256 }
+    end
+    return { 255, 255, 255 }
+end
+
 function Util.lerp_rgb(from_rgb, to_rgb, t)
+    local f = to_rgb_table(from_rgb)
+    local to = to_rgb_table(to_rgb)
     return {
-        lerp(from_rgb[1], to_rgb[1], t),
-        lerp(from_rgb[2], to_rgb[2], t),
-        lerp(from_rgb[3], to_rgb[3], t),
+        lerp(f[1], to[1], t),
+        lerp(f[2], to[2], t),
+        lerp(f[3], to[3], t),
     }
 end
 
@@ -322,6 +353,18 @@ Util.ENEMY_TUNING = {
             boss = { hp = 3.0, reward = 2.5, scale = 1.35 },   -- Tardigrado Alfa (~300 de vida, ~50 de recompensa)
         },
     },
+    Monkey = {
+        hp = 1.2, reward = 1.0,
+        variants = {
+            boss = { hp = 2.5, reward = 2.0, scale = 1.3 },
+        },
+    },
+    RestlessOak = {
+        hp = 1.0, reward = 1.0,
+        variants = {
+            boss = { hp = 2.2, reward = 2.2, scale = 1.2 },
+        },
+    },
 }
 
 -- Tardigrado Alfa: umbral y probabilidad segun la amenaza
@@ -402,6 +445,13 @@ function Util.resolve_constants(names)
     local list = {}
     for _, name in ipairs(names) do
         local value = gm.constants[name]
+        if not value and Object and Object.find then
+            local obj = Object.find(name) or Object.find(name, NAMESPACE)
+            if obj and obj.value then value = obj.value end
+        end
+        if not value and RCC_SEARCH and RCC_SEARCH.object then
+            value = RCC_SEARCH.object(name)
+        end
         if value then
             table.insert(list, value)
         end
@@ -597,6 +647,11 @@ end
 
 -- Jugador mas cercano a un punto (o nil si no hay jugadores)
 function Util.nearest_player(x, y)
+    if RCC_SEARCH and RCC_SEARCH.nearest_player then
+        local p = RCC_SEARCH.nearest_player(x, y)
+        if p then return p end
+    end
+
     local best, best_dist = nil, math.huge
     for _, player in ipairs(Instance.find_all(gm.constants.oP)) do
         local dx, dy = player.x - x, player.y - y
@@ -608,7 +663,7 @@ function Util.nearest_player(x, y)
     return best
 end
 
--- Cache de ids de elite resueltos por nombre (los ids numericos no son fiables)
+-- Cache de ids de elite resueltos por nombre (con fallback a escaneo manual si Search no esta cargado)
 local elite_ids = nil
 
 local function scan_elites()
@@ -630,10 +685,187 @@ local function scan_elites()
 end
 
 function Util.elite_id(name, fallback)
+    if RCC_SEARCH and RCC_SEARCH.elite then
+        local found = RCC_SEARCH.elite(name, fallback)
+        if found ~= nil then return found end
+    end
+
     if not elite_ids then scan_elites() end
     return elite_ids[name] or fallback
+end
+
+-- Atajos espaciales de busqueda expuestos en Util
+Util.Search = RCC_SEARCH
+Util.find_in_radius = function(...)
+    if RCC_SEARCH then return RCC_SEARCH.in_radius(...) end
+    return {}
+end
+Util.find_nearest = function(...)
+    if RCC_SEARCH then return RCC_SEARCH.nearest(...) end
+    return nil
+end
+
+-- Deteccion universal de interaccion (controles nativos, ReturnsAPI, teclado, mando y raton)
+function Util.is_interact_pressed(player)
+    -- 1. Script nativo de RoRR control_interact_pressed / control_swap_pressed
+    local ok_ctrl, res_ctrl = pcall(function()
+        local pidx = (player and player.player_index) or 0
+        if gm.control_interact_pressed and Util.bool(gm.control_interact_pressed(pidx)) then return true end
+        if gm.control_swap_pressed and Util.bool(gm.control_swap_pressed(pidx)) then return true end
+        return false
+    end)
+    if ok_ctrl and res_ctrl then return true end
+
+    -- 2. Control del jugador via ReturnsAPI
+    local ok_p, res_p = pcall(function()
+        local pw = (Player and Player.get_local and Player.get_local()) or (player and Instance.wrap and Instance.wrap(player))
+        if pw and pw.control then
+            for _, verb in ipairs({ "interact", "swap", "up" }) do
+                if Util.bool(pw:control(verb, 1)) or Util.bool(pw:control(verb, 0)) then return true end
+            end
+        end
+        return false
+    end)
+    if ok_p and res_p then return true end
+
+    -- 3. Teclado directo: E (69), A (65), F (70), Q (81), Arriba (38)
+    local keys_to_check = { 69, 65, 70, 81, 38 }
+    for _, k in ipairs(keys_to_check) do
+        if Util.bool(gm.keyboard_check_pressed(k)) then return true end
+    end
+
+    -- 4. Mando / Gamepad: revisa botones de interaccion tipicos (A, X, RB, D-Pad Arriba)
+    local ok_pad, res_pad = pcall(function()
+        local pad_buttons = { 32769, 32771, 32775, 32781 } -- gp_face1 (A), gp_face3 (X), gp_shoulderr (RB), gp_padu (Up)
+        for pad = 0, 4 do
+            if Util.bool(gm.gamepad_is_connected(pad)) then
+                for _, btn in ipairs(pad_buttons) do
+                    if Util.bool(gm.gamepad_button_check_pressed(pad, btn)) then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end)
+    if ok_pad and res_pad then return true end
+
+    -- 5. Raton directo (click interactivo)
+    if Util.bool(gm.mouse_check_button_pressed(1)) then
+        return true
+    end
+
+    -- 6. Banderas directas del actor
+    if player then
+        for _, flag in ipairs({ "key_use", "key_use_pressed", "input_use", "input_use_pressed", "hold_use",
+                                "key_swap", "key_swap_pressed", "input_swap", "input_swap_pressed", "hold_swap",
+                                "key_interact", "key_interact_pressed" }) do
+            if player[flag] and Util.bool(player[flag]) then return true end
+        end
+    end
+
+    return false
+end
+
+-- Consulta el oro real disponible para el jugador (desde gm.player_get_gold, oHUD o actor)
+function Util.get_available_gold(player)
+    local max_gold = 0
+    local target_holder = nil
+
+    -- 0. Script nativo player_get_gold
+    pcall(function()
+        if gm.player_get_gold then
+            local g = gm.player_get_gold(player)
+            if type(g) == "number" and g > max_gold then
+                max_gold = g
+            end
+        end
+    end)
+
+    -- 1. HUD oficial via GameMaker
+    pcall(function()
+        local hud = (gm and gm._mod_game_getHUD and gm._mod_game_getHUD()) or (GM and GM._mod_game_getHUD and GM._mod_game_getHUD())
+        if hud and hud ~= -4 and type(hud.gold) == "number" and hud.gold >= max_gold then
+            max_gold = hud.gold
+            target_holder = hud
+        end
+    end)
+
+    -- 2. Busqueda en instancias de oHUD
+    for _, hud in ipairs(Instance.find_all(gm.constants.oHUD)) do
+        if type(hud.gold) == "number" and hud.gold >= max_gold then
+            max_gold = hud.gold
+            target_holder = hud
+        end
+    end
+
+    -- 3. Oro del propio actor jugador
+    if player and type(player.gold) == "number" and player.gold >= max_gold then
+        max_gold = player.gold
+        if not target_holder then target_holder = player end
+    end
+
+    -- 4. Player local
+    pcall(function()
+        local lp = Player and Player.get_local and Player.get_local()
+        if lp and type(lp.gold) == "number" and lp.gold >= max_gold then
+            max_gold = lp.gold
+        end
+    end)
+
+    return max_gold, target_holder
+end
+
+-- Descuenta oro del HUD y del jugador de forma exhaustiva
+function Util.deduct_gold(player, amount)
+    local paid = false
+
+    -- 1. HUD oficial via add_gold
+    pcall(function()
+        for _, hud in ipairs(Instance.find_all(gm.constants.oHUD)) do
+            if hud.add_gold then
+                hud:add_gold(-amount)
+                paid = true
+            elseif type(hud.gold) == "number" then
+                hud.gold = math.max(0, hud.gold - amount)
+                paid = true
+            end
+        end
+    end)
+
+    -- 2. HUD oficial singleton
+    pcall(function()
+        local hud = (gm and gm._mod_game_getHUD and gm._mod_game_getHUD()) or (GM and GM._mod_game_getHUD and GM._mod_game_getHUD())
+        if hud and hud ~= -4 then
+            if hud.add_gold then
+                hud:add_gold(-amount)
+                paid = true
+            elseif type(hud.gold) == "number" then
+                hud.gold = math.max(0, hud.gold - amount)
+                paid = true
+            end
+        end
+    end)
+
+    -- 3. Jugador
+    if player and type(player.gold) == "number" then
+        player.gold = math.max(0, player.gold - amount)
+        paid = true
+    end
+
+    -- 4. Player local
+    pcall(function()
+        local lp = Player and Player.get_local and Player.get_local()
+        if lp and type(lp.gold) == "number" then
+            lp.gold = math.max(0, lp.gold - amount)
+            paid = true
+        end
+    end)
+
+    return paid
 end
 
 RCC_UTIL = Util
 
 return Util
+
